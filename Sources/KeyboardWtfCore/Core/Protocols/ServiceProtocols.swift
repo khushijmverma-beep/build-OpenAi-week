@@ -75,7 +75,11 @@ public protocol FileSearchService: AnyObject {
     func search(query: String, roots: [URL]) async throws -> [URL]
 }
 
-public protocol WindowController: AnyObject { func listWindows() async -> [String] }
+public protocol WindowController: AnyObject {
+    func listWindows() async -> [String]
+    func focusWindow(matching title: String) async -> ActionReceipt
+    func minimiseWindow(matching title: String) async -> ActionReceipt
+}
 public protocol SpaceController: AnyObject { func switchSpace(direction: Int) async -> ActionReceipt }
 public protocol ScreenCaptureService: AnyObject { func screenshot() async throws -> URL }
 public protocol CameraCaptureService: AnyObject { func capturePhoto() async throws -> URL }

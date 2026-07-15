@@ -43,6 +43,7 @@ public final class AppEnvironment {
             responses: OpenAIResponsesService(credentials: credentials),
             realtime: OpenAIRealtimeWebSocketClient(credentials: credentials),
             delivery: delivery,
+            selectedText: selectedText,
             tools: DefaultToolRegistry(),
             executor: executor,
             policy: DefaultPermissionPolicy(),

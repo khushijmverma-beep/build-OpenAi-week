@@ -44,6 +44,12 @@ public final class MacActionExecutor: ActionExecutor {
         case .listWindows:
             let result = await windows.listWindows()
             return ActionReceipt(toolName: call.name, requestedTarget: "windows", success: true, verified: true, summary: result.prefix(8).joined(separator: " • "))
+        case .focusWindow:
+            guard let args = decode(TitleArguments.self, call) else { return invalid(call) }
+            return await windows.focusWindow(matching: args.title)
+        case .minimiseWindow:
+            guard let args = decode(TitleArguments.self, call) else { return invalid(call) }
+            return await windows.minimiseWindow(matching: args.title)
         case .searchFiles:
             guard let args = decode(SearchArguments.self, call) else { return invalid(call) }
             do {
@@ -100,5 +106,6 @@ private struct URLArguments: Decodable { let url: String }
 private struct TextArguments: Decodable { let text: String }
 private struct SearchArguments: Decodable { let query: String }
 private struct PathArguments: Decodable { let path: String }
+private struct TitleArguments: Decodable { let title: String }
 private struct MemoryArguments: Decodable { let key: String; let value: String }
 private struct WorkflowArguments: Decodable { let name: String; let triggers: String; let steps: String }

@@ -9,6 +9,7 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
     private let responses: OpenAIResponsesClient
     private let realtime: OpenAIRealtimeClient
     private let delivery: TextDeliveryService
+    private let selectedText: SelectedTextProvider
     private let tools: ToolRegistry
     private let executor: ActionExecutor
     private let policy: PermissionPolicy
@@ -20,14 +21,16 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
     private var realtimeTask: Task<Void, Never>?
     private var pendingTool: ToolCall?
     private var confirmation: PendingConfirmation?
+    private var invocationSelection: SelectedTextContext?
 
-    public init(state: ObservableAssistantStateStore, audioCapture: AudioCaptureService, audioPlayback: AudioPlaybackService, recognizer: LocalSpeechRecognizer, responses: OpenAIResponsesClient, realtime: OpenAIRealtimeClient, delivery: TextDeliveryService, tools: ToolRegistry, executor: ActionExecutor, policy: PermissionPolicy, receiptStore: ActionReceiptStore, settings: SettingsStore) {
-        self.state = state; self.audioCapture = audioCapture; self.audioPlayback = audioPlayback; self.recognizer = recognizer; self.responses = responses; self.realtime = realtime; self.delivery = delivery; self.tools = tools; self.executor = executor; self.policy = policy; self.receiptStore = receiptStore; self.settings = settings
+    public init(state: ObservableAssistantStateStore, audioCapture: AudioCaptureService, audioPlayback: AudioPlaybackService, recognizer: LocalSpeechRecognizer, responses: OpenAIResponsesClient, realtime: OpenAIRealtimeClient, delivery: TextDeliveryService, selectedText: SelectedTextProvider, tools: ToolRegistry, executor: ActionExecutor, policy: PermissionPolicy, receiptStore: ActionReceiptStore, settings: SettingsStore) {
+        self.state = state; self.audioCapture = audioCapture; self.audioPlayback = audioPlayback; self.recognizer = recognizer; self.responses = responses; self.realtime = realtime; self.delivery = delivery; self.selectedText = selectedText; self.tools = tools; self.executor = executor; self.policy = policy; self.receiptStore = receiptStore; self.settings = settings
         audioCapture.onAudioChunk = { [weak self] data, level in Task { await self?.ingestAudio(data, level: level) } }
     }
 
     public func start(mode: AssistantMode) async {
         if activeMode == mode { await finishActiveMode(); return }
+        invocationSelection = mode == .smartWriting || mode == .jarvis ? await selectedText.capture() : nil
         await cancel(silent: true)
         activeMode = mode; operationID = UUID()
         switch mode {
@@ -82,14 +85,19 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
 
     private func smartWrite(_ transcript: String) async throws -> String {
         let instructions = "Return only the requested rewritten content. Preserve factual meaning, names, URLs, numbers, and code. Remove spoken fillers and false starts, honor self-corrections, fix punctuation, and never add commentary."
-        let result = try await responses.create(ResponsesRequest(model: settings.settings.responsesModel, instructions: instructions, input: transcript))
+        let input: String
+        if let selection = invocationSelection, !selection.text.isEmpty {
+            input = "Selected text:\n\(selection.text)\n\nSpoken request:\n\(transcript)"
+        } else { input = transcript }
+        let result = try await responses.create(ResponsesRequest(model: settings.settings.responsesModel, instructions: instructions, input: input))
         return result.outputText
     }
 
     private func beginJarvis() async {
         state.transition(to: AssistantSnapshot(phase: .connecting, mode: .jarvis, title: settings.settings.assistantName, detail: "Starting live conversation…", cancelHint: "⌃⌥X cancels"))
         do {
-            let instructions = "You are \(settings.settings.assistantName), a concise macOS assistant. Use typed tools only. Never claim an action succeeded without its returned receipt. Ask when ambiguous. Require a fresh confirmation for restart and shutdown."
+            let selectionContext = invocationSelection?.text.isEmpty == false ? " The user explicitly selected this context before invoking you: \(invocationSelection!.text). Use it only when relevant to their request; do not retain it." : ""
+            let instructions = "You are \(settings.settings.assistantName), a concise macOS assistant. Use typed tools only. Never claim an action succeeded without its returned receipt. Ask when ambiguous. Require a fresh confirmation for restart and shutdown.\(selectionContext)"
             try await realtime.connect(configuration: RealtimeConfiguration(model: settings.settings.realtimeModel, assistantName: settings.settings.assistantName, instructions: instructions, tools: tools.schemas()))
             try audioCapture.start()
             let events = realtime.events

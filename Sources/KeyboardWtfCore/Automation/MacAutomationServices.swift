@@ -80,6 +80,28 @@ public final class MacWindowController: WindowController {
             return titles.isEmpty ? nil : "\(name): \(titles.joined(separator: ", "))"
         }
     }
+
+    public func focusWindow(matching title: String) async -> ActionReceipt { await updateWindow(matching: title, tool: .focusWindow, action: kAXRaiseAction as String) }
+    public func minimiseWindow(matching title: String) async -> ActionReceipt { await updateWindow(matching: title, tool: .minimiseWindow, action: nil) }
+
+    private func updateWindow(matching title: String, tool: ToolName, action: String?) async -> ActionReceipt {
+        let started = Date()
+        for app in NSWorkspace.shared.runningApplications {
+            let application = AXUIElementCreateApplication(app.processIdentifier)
+            var rawWindows: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(application, kAXWindowsAttribute as CFString, &rawWindows) == .success, let windows = rawWindows as? [AXUIElement] else { continue }
+            for window in windows {
+                var rawTitle: CFTypeRef?
+                guard AXUIElementCopyAttributeValue(window, kAXTitleAttribute as CFString, &rawTitle) == .success, let windowTitle = rawTitle as? String, FuzzyScore.score(title, windowTitle) >= 0.56 else { continue }
+                let status: AXError
+                if let action { status = AXUIElementPerformAction(window, action as CFString) }
+                else { status = AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanTrue) }
+                let success = status == .success
+                return ActionReceipt(toolName: tool, requestedTarget: title, resolvedTarget: windowTitle, success: success, verified: success, summary: success ? "\(tool == .focusWindow ? "Focused" : "Minimised") \(windowTitle)." : "macOS did not allow that window action.", startedAt: started, endedAt: Date(), failureCategory: success ? .none : .permission, permissionBlocked: !success)
+            }
+        }
+        return ActionReceipt(toolName: tool, requestedTarget: title, success: false, verified: false, summary: "No accessible window matched \(title).", startedAt: started, endedAt: Date(), failureCategory: .notFound)
+    }
 }
 
 public final class DefaultPermissionPolicy: PermissionPolicy {
@@ -108,6 +130,8 @@ public final class DefaultToolRegistry: ToolRegistry {
             ToolDefinition(name: .getSelectedText, description: "Read currently selected text when macOS permits it.", parameters: []),
             ToolDefinition(name: .listRunningApps, description: "List running applications.", parameters: []),
             ToolDefinition(name: .listWindows, description: "List accessible windows.", parameters: []),
+            ToolDefinition(name: .focusWindow, description: "Focus an accessible window by title.", parameters: [ToolParameter(name: "title", type: .string, description: "Window title")]),
+            ToolDefinition(name: .minimiseWindow, description: "Minimise an accessible window by title.", parameters: [ToolParameter(name: "title", type: .string, description: "Window title")]),
             ToolDefinition(name: .searchFiles, description: "Search user-approved folders for a filename.", parameters: [ToolParameter(name: "query", type: .string, description: "Filename or phrase")]),
             ToolDefinition(name: .openFile, description: "Open an approved, non-executable local file.", parameters: [ToolParameter(name: "path", type: .string, description: "Absolute file path")]),
             ToolDefinition(name: .openFolder, description: "Open an approved local folder.", parameters: [ToolParameter(name: "path", type: .string, description: "Absolute folder path")]),
