@@ -1,0 +1,50 @@
+name: keyboard.wtf
+options:
+  bundleIdPrefix: com.yourname
+  deploymentTarget:
+    macOS: "14.0"
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    DEVELOPMENT_TEAM: ""
+targets:
+  KeyboardWtfCore:
+    type: framework
+    platform: macOS
+    sources: [Sources/KeyboardWtfCore]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.yourname.keyboardwtf.core
+        GENERATE_INFOPLIST_FILE: YES
+  keyboard.wtf:
+    type: application
+    platform: macOS
+    sources:
+      - Sources/KeyboardWtfApp
+      - path: Resources/Assets
+        buildPhase: resources
+    dependencies:
+      - target: KeyboardWtfCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.yourname.keyboardwtf
+        PRODUCT_NAME: keyboard.wtf
+        INFOPLIST_FILE: Sources/KeyboardWtfApp/Resources/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Sources/KeyboardWtfApp/Resources/keyboard.wtf.entitlements
+        CODE_SIGN_STYLE: Automatic
+        ENABLE_HARDENED_RUNTIME: YES
+  KeyboardWtfCoreTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources: [Tests/KeyboardWtfCoreTests]
+    dependencies:
+      - target: KeyboardWtfCore
+schemes:
+  keyboard.wtf:
+    build:
+      targets:
+        keyboard.wtf: all
+    test:
+      targets:
+        - KeyboardWtfCoreTests
