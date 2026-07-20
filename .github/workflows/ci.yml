@@ -1,0 +1,20 @@
+name: macOS CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  verify:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode 16
+        run: sudo xcode-select -s /Applications/Xcode_16.0.app/Contents/Developer || xcodebuild -version
+      - name: Scan for committed credentials
+        run: bash Scripts/scan-secrets.sh
+      - name: Build debug
+        run: swift build -c debug
+      - name: Run tests
+        run: swift test
+      - name: Build release
+        run: swift build -c release
