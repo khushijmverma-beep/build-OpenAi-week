@@ -10,6 +10,7 @@ struct KeyboardWtfApp: App {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private let initialSettingsShownKey = "keyboard.wtf.initial-settings-shown"
     private(set) var environment: AppEnvironment?
     private var overlay: OverlayPanelController?
     private var menuBar: MenuBarController?
@@ -23,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menuBar = MenuBarController(coordinator: environment.coordinator, openSettings: { [weak self] in self?.showSettings() })
             do { try environment.hotkeys.registerDefaults() }
             catch { environment.state.transition(to: AssistantSnapshot(phase: .error, title: "Hotkeys unavailable", detail: error.localizedDescription)) }
+            showInitialSettingsIfNeeded()
         } catch {
             environment = nil
         }
@@ -49,6 +51,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsWindow = window
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func showInitialSettingsIfNeeded() {
+        guard !UserDefaults.standard.bool(forKey: initialSettingsShownKey) else { return }
+        UserDefaults.standard.set(true, forKey: initialSettingsShownKey)
+        showSettings()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
