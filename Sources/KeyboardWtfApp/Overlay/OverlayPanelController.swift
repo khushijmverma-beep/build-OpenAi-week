@@ -78,10 +78,28 @@ private struct StatusOrb: View {
     private var color: Color { switch tone { case .purple: return .purple; case .red: return .red; case .blue: return .blue; case .amber: return .orange; case .teal: return .teal; case .green: return .green } }
     var body: some View {
         ZStack {
-            Circle().fill(color.opacity(active ? 0.22 + Double(level) * 0.35 : 0.18)).frame(width: 52 + CGFloat(level) * 9, height: 52 + CGFloat(level) * 9)
-            Circle().fill(color).frame(width: 46, height: 46)
-            if active { Circle().fill(.white.opacity(0.92)).frame(width: 12, height: 12) }
-        }.frame(width: 58, height: 58).animation(.easeOut(duration: 0.12), value: level)
+            // Keep the core sharply defined; the blurred layer is only a subtle glow.
+            Circle()
+                .fill(color.opacity(active ? 0.48 : 0.30))
+                .frame(width: active ? 62 : 56, height: active ? 62 : 56)
+                .blur(radius: active ? 11 : 8)
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: [color.opacity(0.98), color.opacity(0.78)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 48, height: 48)
+                .overlay(Circle().strokeBorder(.white.opacity(0.28), lineWidth: 1))
+                .shadow(color: color.opacity(0.55), radius: 7, y: 2)
+            if active {
+                Circle().fill(.white.opacity(0.96)).frame(width: 12, height: 12)
+            }
+        }
+        .frame(width: 62, height: 62)
+        .animation(.easeOut(duration: 0.12), value: level)
     }
 }
 
