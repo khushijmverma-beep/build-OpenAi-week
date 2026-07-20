@@ -1,10 +1,14 @@
 import AppKit
 import KeyboardWtfCore
 
+@MainActor
 final class MenuBarController: NSObject {
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let coordinator: AssistantCoordinator
-    init(coordinator: AssistantCoordinator) {
+    private let openSettings: () -> Void
+
+    init(coordinator: AssistantCoordinator, openSettings: @escaping () -> Void) {
+        self.openSettings = openSettings
         self.coordinator = coordinator; super.init()
         item.button?.image = NSImage(systemSymbolName: "keyboard", accessibilityDescription: "keyboard.wtf")
         let menu = NSMenu()
@@ -13,7 +17,7 @@ final class MenuBarController: NSObject {
         menu.addItem(item("Jarvis", key: "q") { Task { await coordinator.start(mode: .jarvis) } })
         menu.addItem(.separator())
         menu.addItem(item("Cancel", key: "x") { Task { await coordinator.cancel() } })
-        menu.addItem(item("Settings…", key: ",") { NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) })
+        menu.addItem(item("Settings…", key: ",", action: openSettings))
         menu.addItem(.separator())
         menu.addItem(item("Quit keyboard.wtf", key: "q") { NSApp.terminate(nil) })
         item.menu = menu

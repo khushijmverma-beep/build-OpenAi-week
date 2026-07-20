@@ -9,6 +9,7 @@ public final class AppEnvironment {
     public let credentials: CredentialProvider
     public let permissionCenter: PermissionCenter
     public let receiptStore: ActionReceiptStore
+    public var presentSettings: (() -> Void)?
     public lazy var hotkeys: GlobalHotkeyService = GlobalHotkeyService { [weak self] action in
         Task { @MainActor in
             guard let self else { return }
@@ -17,7 +18,7 @@ public final class AppEnvironment {
             case .smartWriting: await self.coordinator.start(mode: .smartWriting)
             case .jarvis: await self.coordinator.start(mode: .jarvis)
             case .cancel: await self.coordinator.cancel()
-            case .settings: NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+            case .settings: self.presentSettings?()
             }
         }
     }
