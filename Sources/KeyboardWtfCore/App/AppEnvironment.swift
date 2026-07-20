@@ -33,7 +33,7 @@ public final class AppEnvironment {
         let database = try SQLiteStore()
         receiptStore = database
         let appResolver = MacAppResolver()
-        let executor = MacActionExecutor(apps: appResolver, delivery: delivery, selectedText: selectedText, clipboard: clipboard, system: MacSystemActionService(), files: BoundedFileSearchService(), windows: MacWindowController(), memory: database, workflows: database)
+        let executor = MacActionExecutor(apps: appResolver, delivery: delivery, selectedText: selectedText, clipboard: clipboard, system: MacSystemActionService(), files: BoundedFileSearchService(), windows: MacWindowController(), screen: MacScreenCaptureService(), memory: database, workflows: database)
         permissionCenter = PermissionCenter()
         coordinator = AssistantCoordinator(
             state: state,

@@ -55,7 +55,7 @@ public final class OnDeviceSpeechRecognizer: NSObject, LocalSpeechRecognizer {
         buffer.frameLength = frames
         audio.withUnsafeBytes { raw in
             guard let source = raw.baseAddress, let destination = buffer.int16ChannelData?.pointee else { return }
-            destination.assign(from: source.assumingMemoryBound(to: Int16.self), count: Int(frames))
+            destination.update(from: source.assumingMemoryBound(to: Int16.self), count: Int(frames))
         }
         request.append(buffer)
     }

@@ -29,6 +29,7 @@ public final class OpenAIRealtimeWebSocketClient: OpenAIRealtimeClient {
         components.queryItems = [URLQueryItem(name: "model", value: configuration.model)]
         var request = URLRequest(url: components.url!)
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        request.setValue(installationHash, forHTTPHeaderField: "OpenAI-Safety-Identifier")
         let task = session.webSocketTask(with: request)
         socket = task; task.resume()
         try await send(sessionUpdate(configuration))
@@ -95,6 +96,8 @@ public final class OpenAIRealtimeWebSocketClient: OpenAIRealtimeClient {
             if let delta = object["delta"] as? String { continuation.yield(.inputTranscriptDelta(delta)) }
         case "response.output_item.done":
             if let item = object["item"] as? [String: Any], item["type"] as? String == "function_call", let id = item["call_id"] as? String, let name = item["name"] as? String, let tool = ToolName(rawValue: name), let arguments = item["arguments"] as? String { continuation.yield(.toolCall(ToolCall(id: id, name: tool, argumentsJSON: arguments))) }
+        case "response.function_call_arguments.done":
+            if let id = object["call_id"] as? String, let name = object["name"] as? String, let tool = ToolName(rawValue: name), let arguments = object["arguments"] as? String { continuation.yield(.toolCall(ToolCall(id: id, name: tool, argumentsJSON: arguments))) }
         case "response.done": continuation.yield(.responseDone)
         case "error":
             let error = object["error"] as? [String: Any]
@@ -120,7 +123,7 @@ public final class OpenAIRealtimeWebSocketClient: OpenAIRealtimeClient {
         return [
             "type": "session.update",
             "session": [
-                "type": "realtime", "model": configuration.model, "output_modalities": ["audio", "text"],
+                "type": "realtime", "model": configuration.model, "output_modalities": ["audio"],
                 "instructions": configuration.instructions + "\nSafety identifier: \(installationHash).",
                 "audio": [
                     "input": ["format": ["type": "audio/pcm", "rate": 24_000], "turn_detection": ["type": "semantic_vad"]],

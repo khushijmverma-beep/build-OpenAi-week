@@ -37,5 +37,5 @@ struct SettingsView: View {
 
 private struct PermissionSettingsView: View {
     @ObservedObject var center: PermissionCenter
-    var body: some View { VStack(alignment: .leading) { List(center.records) { record in HStack { VStack(alignment: .leading) { Text(record.kind.rawValue).textCase(.uppercase); Text(record.detail).font(.caption).foregroundStyle(.secondary) }; Spacer(); Text(record.status.rawValue).foregroundStyle(record.status == .authorized ? .green : .secondary) } }; HStack { Button("Refresh") { center.refresh() }; Button("Open Accessibility Settings") { center.openAccessibilitySettings() }; Spacer() } }.padding() }
+    var body: some View { VStack(alignment: .leading) { List(center.records) { record in HStack { VStack(alignment: .leading) { Text(record.kind.rawValue).textCase(.uppercase); Text(record.detail).font(.caption).foregroundStyle(.secondary) }; Spacer(); Text(record.status.rawValue).foregroundStyle(record.status == .authorized ? .green : .secondary) } }; HStack { Button("Refresh") { center.refresh() }; Button("Accessibility") { center.openAccessibilitySettings() }; Button("Screen Recording") { center.openScreenRecordingSettings() }; Spacer() } }.padding() }
 }

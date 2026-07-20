@@ -1,4 +1,4 @@
-// swift-tools-version: 5.7
+// swift-tools-version: 5.9
 import PackageDescription
 
 let package = Package(
@@ -26,6 +26,7 @@ let package = Package(
             name: "KeyboardWtfApp",
             dependencies: ["KeyboardWtfCore"],
             path: "Sources/KeyboardWtfApp",
+            exclude: ["Resources"],
             linkerSettings: [.linkedFramework("SwiftUI")]
         ),
         .testTarget(

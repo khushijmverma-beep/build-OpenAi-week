@@ -18,10 +18,13 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
     private var activeMode: AssistantMode?
     private var operationID = UUID()
     private var partialTask: Task<Void, Never>?
+    private var localCompletionTask: Task<Void, Never>?
     private var realtimeTask: Task<Void, Never>?
     private var pendingTool: ToolCall?
     private var confirmation: PendingConfirmation?
     private var invocationSelection: SelectedTextContext?
+    private let pauseDetector = PauseDetector()
+    private var localSpeechDetected = false
 
     public init(state: ObservableAssistantStateStore, audioCapture: AudioCaptureService, audioPlayback: AudioPlaybackService, recognizer: LocalSpeechRecognizer, responses: OpenAIResponsesClient, realtime: OpenAIRealtimeClient, delivery: TextDeliveryService, selectedText: SelectedTextProvider, tools: ToolRegistry, executor: ActionExecutor, policy: PermissionPolicy, receiptStore: ActionReceiptStore, settings: SettingsStore) {
         self.state = state; self.audioCapture = audioCapture; self.audioPlayback = audioPlayback; self.recognizer = recognizer; self.responses = responses; self.realtime = realtime; self.delivery = delivery; self.selectedText = selectedText; self.tools = tools; self.executor = executor; self.policy = policy; self.receiptStore = receiptStore; self.settings = settings
@@ -30,8 +33,9 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
 
     public func start(mode: AssistantMode) async {
         if activeMode == mode { await finishActiveMode(); return }
-        invocationSelection = mode == .smartWriting || mode == .jarvis ? await selectedText.capture() : nil
         await cancel(silent: true)
+        // Selection is deliberate Jarvis context. Smart Dictation always starts from speech alone.
+        invocationSelection = mode == .jarvis ? await selectedText.capture() : nil
         activeMode = mode; operationID = UUID()
         switch mode {
         case .dictation, .smartWriting: await beginLocalCapture(mode)
@@ -55,9 +59,20 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
             try await recognizer.startStreaming()
             try audioCapture.start()
             let stream = recognizer.partialTranscript
+            localSpeechDetected = false
             partialTask = Task { [weak self] in
                 for await partial in stream {
                     await MainActor.run { self?.state.updatePartialTranscript(partial) }
+                }
+            }
+            localCompletionTask = Task { [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 180_000_000)
+                    guard let self, self.activeMode == mode, self.localSpeechDetected else { continue }
+                    if await self.pauseDetector.detectedPause() {
+                        await self.finishActiveMode()
+                        return
+                    }
                 }
             }
         } catch {
@@ -68,7 +83,7 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
     private func finishActiveMode() async {
         guard let mode = activeMode else { return }
         if mode == .jarvis { await cancel(); return }
-        let id = operationID; audioCapture.stop(); state.transition(to: AssistantSnapshot(phase: .transcribing, mode: mode, title: "Transcribing", detail: "Finishing locally…", partialTranscript: state.snapshot.partialTranscript, cancelHint: "⌃⌥X cancels"))
+        let id = operationID; localCompletionTask?.cancel(); localCompletionTask = nil; audioCapture.stop(); state.transition(to: AssistantSnapshot(phase: .transcribing, mode: mode, title: "Transcribing", detail: "Finishing locally…", partialTranscript: state.snapshot.partialTranscript, cancelHint: "⌃⌥X cancels"))
         do {
             let transcript = try await recognizer.finish(); guard id == operationID else { return }
             let text: String
@@ -85,11 +100,7 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
 
     private func smartWrite(_ transcript: String) async throws -> String {
         let instructions = "Return only the requested rewritten content. Preserve factual meaning, names, URLs, numbers, and code. Remove spoken fillers and false starts, honor self-corrections, fix punctuation, and never add commentary."
-        let input: String
-        if let selection = invocationSelection, !selection.text.isEmpty {
-            input = "Selected text:\n\(selection.text)\n\nSpoken request:\n\(transcript)"
-        } else { input = transcript }
-        let result = try await responses.create(ResponsesRequest(model: settings.settings.responsesModel, instructions: instructions, input: input))
+        let result = try await responses.create(ResponsesRequest(model: settings.settings.responsesModel, instructions: instructions, input: transcript))
         return result.outputText
     }
 
@@ -114,6 +125,10 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
         state.updateMicrophoneLevel(level)
         guard let activeMode else { return }
         if activeMode == .jarvis { try? await realtime.appendAudio(data) } else { await recognizer.append(audio: data) }
+        if activeMode != .jarvis {
+            await pauseDetector.ingest(level: level)
+            if level >= 0.035 { localSpeechDetected = true }
+        }
     }
 
     private func handle(_ event: RealtimeEvent) async {
@@ -138,7 +153,7 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
     }
 
     private func cancel(silent: Bool) async {
-        operationID = UUID(); audioCapture.stop(); audioPlayback.stop(); partialTask?.cancel(); realtimeTask?.cancel(); partialTask = nil; realtimeTask = nil; await recognizer.cancel(); await realtime.interrupt(); await realtime.disconnect(); activeMode = nil; pendingTool = nil; confirmation = nil
+        operationID = UUID(); audioCapture.stop(); audioPlayback.stop(); partialTask?.cancel(); localCompletionTask?.cancel(); realtimeTask?.cancel(); partialTask = nil; localCompletionTask = nil; realtimeTask = nil; localSpeechDetected = false; await recognizer.cancel(); await realtime.interrupt(); await realtime.disconnect(); activeMode = nil; pendingTool = nil; confirmation = nil
         if !silent { state.transition(to: AssistantSnapshot(phase: .cancelled, title: "Cancelled", detail: "Nothing else will be typed, spoken, or executed.")) }
     }
 

@@ -1,6 +1,8 @@
 import AppKit
 import ApplicationServices
 import Foundation
+import ImageIO
+import UniformTypeIdentifiers
 
 public final class MacAppResolver: AppResolver {
     private let workspace: NSWorkspace
@@ -68,6 +70,28 @@ public final class BoundedFileSearchService: FileSearchService {
     }
 }
 
+public final class MacScreenCaptureService: ScreenCaptureService {
+    public init() {}
+
+    public func screenshot() async throws -> URL {
+        guard CGPreflightScreenCaptureAccess() else { throw AppError.permission(.screenRecording) }
+        guard let image = CGWindowListCreateImage(.infinite, .optionOnScreenOnly, kCGNullWindowID, .bestResolution) else {
+            throw AppError.unsupported("macOS could not capture the screen.")
+        }
+        let directory = FileManager.default.urls(for: .picturesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("keyboard.wtf", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+        let url = directory.appendingPathComponent("Screenshot-\(stamp).png")
+        guard let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil) else {
+            throw AppError.unsupported("macOS could not write the screenshot.")
+        }
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination) else { throw AppError.unsupported("macOS could not finalise the screenshot.") }
+        return url
+    }
+}
+
 public final class MacWindowController: WindowController {
     public init() {}
     public func listWindows() async -> [String] {
@@ -132,6 +156,7 @@ public final class DefaultToolRegistry: ToolRegistry {
             ToolDefinition(name: .listWindows, description: "List accessible windows.", parameters: []),
             ToolDefinition(name: .focusWindow, description: "Focus an accessible window by title.", parameters: [ToolParameter(name: "title", type: .string, description: "Window title")]),
             ToolDefinition(name: .minimiseWindow, description: "Minimise an accessible window by title.", parameters: [ToolParameter(name: "title", type: .string, description: "Window title")]),
+            ToolDefinition(name: .takeScreenshot, description: "Take an explicit screenshot and save it locally. Requires Screen Recording permission.", parameters: []),
             ToolDefinition(name: .searchFiles, description: "Search user-approved folders for a filename.", parameters: [ToolParameter(name: "query", type: .string, description: "Filename or phrase")]),
             ToolDefinition(name: .openFile, description: "Open an approved, non-executable local file.", parameters: [ToolParameter(name: "path", type: .string, description: "Absolute file path")]),
             ToolDefinition(name: .openFolder, description: "Open an approved local folder.", parameters: [ToolParameter(name: "path", type: .string, description: "Absolute folder path")]),

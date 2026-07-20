@@ -9,10 +9,11 @@ public final class MacActionExecutor: ActionExecutor {
     private let system: SystemActionService
     private let files: FileSearchService
     private let windows: WindowController
+    private let screen: ScreenCaptureService
     private let memory: MemoryStore
     private let workflows: WorkflowStore
     private let decoder = JSONDecoder()
-    public init(apps: AppResolver, delivery: TextDeliveryService, selectedText: SelectedTextProvider, clipboard: ClipboardService, system: SystemActionService, files: FileSearchService, windows: WindowController, memory: MemoryStore, workflows: WorkflowStore) { self.apps = apps; self.delivery = delivery; self.selectedText = selectedText; self.clipboard = clipboard; self.system = system; self.files = files; self.windows = windows; self.memory = memory; self.workflows = workflows }
+    public init(apps: AppResolver, delivery: TextDeliveryService, selectedText: SelectedTextProvider, clipboard: ClipboardService, system: SystemActionService, files: FileSearchService, windows: WindowController, screen: ScreenCaptureService, memory: MemoryStore, workflows: WorkflowStore) { self.apps = apps; self.delivery = delivery; self.selectedText = selectedText; self.clipboard = clipboard; self.system = system; self.files = files; self.windows = windows; self.screen = screen; self.memory = memory; self.workflows = workflows }
 
     public func execute(_ call: ToolCall, confirmed: Bool) async -> ActionReceipt {
         switch call.name {
@@ -50,6 +51,15 @@ public final class MacActionExecutor: ActionExecutor {
         case .minimiseWindow:
             guard let args = decode(TitleArguments.self, call) else { return invalid(call) }
             return await windows.minimiseWindow(matching: args.title)
+        case .takeScreenshot:
+            do {
+                let url = try await screen.screenshot()
+                return ActionReceipt(toolName: call.name, requestedTarget: "screen", resolvedTarget: url.path, success: true, verified: FileManager.default.fileExists(atPath: url.path), summary: "Saved a screenshot to \(url.lastPathComponent).")
+            } catch AppError.permission {
+                return ActionReceipt(toolName: call.name, requestedTarget: "screen", success: false, verified: false, summary: "Screen Recording permission is required before taking a screenshot.", failureCategory: .permission, permissionBlocked: true)
+            } catch {
+                return ActionReceipt(toolName: call.name, requestedTarget: "screen", success: false, verified: false, summary: "Could not capture the screen.", failureCategory: .unknown)
+            }
         case .searchFiles:
             guard let args = decode(SearchArguments.self, call) else { return invalid(call) }
             do {

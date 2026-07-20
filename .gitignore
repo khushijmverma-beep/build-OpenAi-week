@@ -2,6 +2,9 @@
 .env.save
 .DS_Store
 .build/
+dist/
+.codex/
+.git.worktree-metadata.broken
 DerivedData/
 build/
 *.xcodeproj

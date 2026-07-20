@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import AVFoundation
+import CoreGraphics
 import Foundation
 
 public struct PermissionRecord: Identifiable, Equatable, Sendable {
@@ -22,10 +23,11 @@ public final class PermissionCenter: ObservableObject {
         let camera: PermissionStatus
         switch AVCaptureDevice.authorizationStatus(for: .video) { case .authorized: camera = .authorized; case .denied: camera = .denied; case .restricted: camera = .restricted; case .notDetermined: camera = .notDetermined; @unknown default: camera = .unknown }
         let now = Date()
+        let screenRecording: PermissionStatus = CGPreflightScreenCaptureAccess() ? .authorized : .denied
         records = [
             PermissionRecord(kind: .microphone, status: microphone, detail: "Voice input for all three modes.", checkedAt: now),
             PermissionRecord(kind: .accessibility, status: accessibility, detail: "Selected-text capture, insertion, and window control.", checkedAt: now),
-            PermissionRecord(kind: .screenRecording, status: .unknown, detail: "Explicit screenshots and screen guidance only.", checkedAt: now),
+            PermissionRecord(kind: .screenRecording, status: screenRecording, detail: "Explicit screenshots and screen guidance only.", checkedAt: now),
             PermissionRecord(kind: .camera, status: camera, detail: "A single photo only when requested.", checkedAt: now),
             PermissionRecord(kind: .automation, status: .unknown, detail: "Limited approved automation actions.", checkedAt: now),
             PermissionRecord(kind: .filesAndFolders, status: .unknown, detail: "User-approved file search roots.", checkedAt: now),
@@ -33,4 +35,5 @@ public final class PermissionCenter: ObservableObject {
         ]
     }
     public func openAccessibilitySettings() { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!) }
+    public func openScreenRecordingSettings() { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!) }
 }

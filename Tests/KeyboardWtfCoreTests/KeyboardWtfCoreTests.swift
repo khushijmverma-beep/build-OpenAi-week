@@ -33,9 +33,23 @@ final class KeyboardWtfCoreTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: url) }
         let store = try SQLiteStore(url: url)
         try await store.remember(key: "browser", value: "Safari", sensitivity: .ordinary)
-        XCTAssertEqual(try await store.search("browser").first?.value, "Safari")
+        let memories = try await store.search("browser")
+        XCTAssertEqual(memories.first?.value, "Safari")
         let workflow = Workflow(name: "work setup", triggers: ["start work"], steps: [WorkflowStep(tool: .openApp, argumentsJSON: "{\"name\":\"Safari\"}")])
         try await store.save(workflow)
-        XCTAssertEqual(try await store.all().first?.name, "work setup")
+        let workflows = try await store.all()
+        XCTAssertEqual(workflows.first?.name, "work setup")
+    }
+
+    func testLiveResponsesSmokeWhenExplicitlyEnabled() async throws {
+        guard ProcessInfo.processInfo.environment["RUN_LIVE_OPENAI_TESTS"] == "1" else {
+            throw XCTSkip("Live API checks are opt-in.")
+        }
+        let client = OpenAIResponsesService(credentials: KeychainCredentialProvider())
+        let result = try await client.create(ResponsesRequest(
+            instructions: "Reply with exactly: ok",
+            input: "Connection test"
+        ))
+        XCTAssertEqual(result.outputText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), "ok")
     }
 }

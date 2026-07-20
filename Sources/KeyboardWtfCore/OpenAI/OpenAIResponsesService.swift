@@ -4,7 +4,11 @@ public final class OpenAIResponsesService: OpenAIResponsesClient {
     private let credentials: CredentialProvider
     private let session: URLSession
     private let logger: Logger
-    public init(credentials: CredentialProvider, session: URLSession = .shared, logger: Logger = RedactingLogger()) { self.credentials = credentials; self.session = session; self.logger = logger }
+    public init(credentials: CredentialProvider, session: URLSession? = nil, logger: Logger = RedactingLogger()) {
+        self.credentials = credentials
+        self.session = session ?? OpenAIURLSession.default
+        self.logger = logger
+    }
 
     public func create(_ request: ResponsesRequest) async throws -> ResponsesResult {
         guard let key = try credentials.apiKey(), !key.isEmpty else { throw AppError.authentication }
@@ -40,4 +44,13 @@ public final class OpenAIResponsesService: OpenAIResponsesClient {
         let usage = object["usage"] as? [String: Any]
         return ResponsesResult(id: id, outputText: text, model: model, inputTokens: usage?["input_tokens"] as? Int, outputTokens: usage?["output_tokens"] as? Int)
     }
+}
+
+private enum OpenAIURLSession {
+    static let `default`: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 25
+        configuration.timeoutIntervalForResource = 30
+        return URLSession(configuration: configuration)
+    }()
 }

@@ -71,7 +71,7 @@ public final class AVAudioPlayback: AudioPlaybackService {
         buffer.frameLength = frames
         data.withUnsafeBytes { bytes in
             guard let source = bytes.baseAddress, let destination = buffer.int16ChannelData?.pointee else { return }
-            destination.assign(from: source.assumingMemoryBound(to: Int16.self), count: Int(frames))
+            destination.update(from: source.assumingMemoryBound(to: Int16.self), count: Int(frames))
         }
         player.scheduleBuffer(buffer, completionHandler: nil)
         if !player.isPlaying { player.play() }
