@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 import Foundation
 import ImageIO
+import ScreenCaptureKit
 import UniformTypeIdentifiers
 
 public final class MacAppResolver: AppResolver {
@@ -75,9 +76,15 @@ public final class MacScreenCaptureService: ScreenCaptureService {
 
     public func screenshot() async throws -> URL {
         guard CGPreflightScreenCaptureAccess() else { throw AppError.permission(.screenRecording) }
-        guard let image = CGWindowListCreateImage(.infinite, .optionOnScreenOnly, kCGNullWindowID, .bestResolution) else {
-            throw AppError.unsupported("macOS could not capture the screen.")
-        }
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        guard let display = content.displays.first else { throw AppError.unsupported("macOS could not find a display to capture.") }
+        let configuration = SCStreamConfiguration()
+        configuration.width = display.width
+        configuration.height = display.height
+        let image = try await SCScreenshotManager.captureImage(
+            contentFilter: SCContentFilter(display: display, excludingWindows: []),
+            configuration: configuration
+        )
         let directory = FileManager.default.urls(for: .picturesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("keyboard.wtf", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

@@ -17,6 +17,7 @@ let package = Package(
                 .linkedFramework("ApplicationServices"),
                 .linkedFramework("AVFoundation"),
                 .linkedFramework("Security"),
+                .linkedFramework("ScreenCaptureKit"),
                 .linkedFramework("Speech"),
                 .linkedFramework("Carbon"),
                 .linkedLibrary("sqlite3")

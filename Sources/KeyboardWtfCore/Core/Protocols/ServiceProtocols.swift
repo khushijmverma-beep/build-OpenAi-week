@@ -22,7 +22,7 @@ public protocol AudioPlaybackService: AnyObject {
     func stop()
 }
 
-public protocol LocalSpeechRecognizer: AnyObject {
+@MainActor public protocol LocalSpeechRecognizer: AnyObject {
     var partialTranscript: AsyncStream<String> { get }
     func prepare() async throws
     func startStreaming() async throws

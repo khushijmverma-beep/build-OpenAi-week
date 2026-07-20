@@ -3,6 +3,7 @@ import Foundation
 import Speech
 
 /// Uses only macOS's on-device speech model. It deliberately refuses a remote recognition path.
+@MainActor
 public final class OnDeviceSpeechRecognizer: NSObject, LocalSpeechRecognizer {
     public let partialTranscript: AsyncStream<String>
     private let continuation: AsyncStream<String>.Continuation
@@ -38,13 +39,9 @@ public final class OnDeviceSpeechRecognizer: NSObject, LocalSpeechRecognizer {
         guard let recognizer = SFSpeechRecognizer(locale: locale) else { throw AppError.modelUnavailable("a local macOS speech model") }
         request = recognitionRequest
         task = recognizer.recognitionTask(with: recognitionRequest) { [weak self] result, error in
-            guard let self else { return }
-            if let result {
-                self.latest = result.bestTranscription.formattedString
-                self.continuation.yield(self.latest)
-                if result.isFinal { self.completion?.resume(returning: self.latest); self.completion = nil }
+            Task { @MainActor [weak self] in
+                self?.handleRecognition(result: result, error: error)
             }
-            if let error, self.completion != nil { self.completion?.resume(throwing: error); self.completion = nil }
         }
     }
 
@@ -65,9 +62,29 @@ public final class OnDeviceSpeechRecognizer: NSObject, LocalSpeechRecognizer {
         request.endAudio()
         return try await withCheckedThrowingContinuation { continuation in
             self.completion = continuation
-            if !latest.isEmpty { DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in guard let self, self.completion != nil else { return }; self.completion?.resume(returning: self.latest); self.completion = nil } }
+            if !latest.isEmpty {
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    self?.completeIfNeeded()
+                }
+            }
         }
     }
 
     public func cancel() async { task?.cancel(); request?.endAudio(); completion?.resume(throwing: AppError.cancellation); completion = nil; request = nil; task = nil }
+
+    private func handleRecognition(result: SFSpeechRecognitionResult?, error: Error?) {
+        if let result {
+            latest = result.bestTranscription.formattedString
+            continuation.yield(latest)
+            if result.isFinal { completion?.resume(returning: latest); completion = nil }
+        }
+        if let error, completion != nil { completion?.resume(throwing: error); completion = nil }
+    }
+
+    private func completeIfNeeded() {
+        guard completion != nil else { return }
+        completion?.resume(returning: latest)
+        completion = nil
+    }
 }
