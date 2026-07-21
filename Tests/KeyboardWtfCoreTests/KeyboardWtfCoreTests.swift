@@ -261,6 +261,76 @@ final class KeyboardWtfCoreTests: XCTestCase {
         XCTAssertEqual(capture.startCount, 2)
         await coordinator.cancel()
     }
+
+    @MainActor
+    func testJarvisCanRestartAfterCancellation() async throws {
+        let realtime = TestRealtimeClient()
+        let capture = TestAudioCapture()
+        let selectedText = TestSelectedTextProvider()
+        let state = ObservableAssistantStateStore()
+        let coordinator = AssistantCoordinator(
+            state: state,
+            audioCapture: capture,
+            audioPlayback: TestAudioPlayback(),
+            recognizer: TestSpeechRecognizer(),
+            responses: TestResponsesClient(),
+            realtime: realtime,
+            delivery: TextDeliveryService(selectedText: selectedText, clipboard: TestClipboard()),
+            selectedText: selectedText,
+            tools: DefaultToolRegistry(),
+            executor: TestActionExecutor(),
+            policy: DefaultPermissionPolicy(),
+            receiptStore: TestReceiptStore(),
+            settings: SettingsStore()
+        )
+
+        await coordinator.start(mode: .jarvis)
+        XCTAssertEqual(realtime.connectCount, 1)
+        XCTAssertEqual(capture.startCount, 1)
+        await coordinator.cancel()
+        // `start` first performs a silent cleanup so the explicit cancel is
+        // the second disconnect call, and both paths must remain reusable.
+        XCTAssertEqual(realtime.disconnectCount, 2)
+        XCTAssertEqual(state.snapshot.phase, .cancelled)
+
+        await coordinator.start(mode: .jarvis)
+        XCTAssertEqual(realtime.connectCount, 2)
+        XCTAssertEqual(capture.startCount, 2)
+        XCTAssertEqual(state.snapshot.phase, .listening)
+        await coordinator.cancel()
+    }
+
+    @MainActor
+    func testJarvisRecoversFromTransientTransportErrorWithoutClosingSession() async throws {
+        let realtime = TestRealtimeClient()
+        let capture = TestAudioCapture()
+        let selectedText = TestSelectedTextProvider()
+        let state = ObservableAssistantStateStore()
+        let coordinator = AssistantCoordinator(
+            state: state,
+            audioCapture: capture,
+            audioPlayback: TestAudioPlayback(),
+            recognizer: TestSpeechRecognizer(),
+            responses: TestResponsesClient(),
+            realtime: realtime,
+            delivery: TextDeliveryService(selectedText: selectedText, clipboard: TestClipboard()),
+            selectedText: selectedText,
+            tools: DefaultToolRegistry(),
+            executor: TestActionExecutor(),
+            policy: DefaultPermissionPolicy(),
+            receiptStore: TestReceiptStore(),
+            settings: SettingsStore()
+        )
+
+        await coordinator.start(mode: .jarvis)
+        realtime.emit(.error(.realtimeTransport("Socket is not connected")))
+        try await Task.sleep(nanoseconds: 900_000_000)
+        XCTAssertGreaterThanOrEqual(realtime.connectCount, 2)
+        XCTAssertEqual(state.snapshot.phase, .listening)
+        XCTAssertEqual(state.snapshot.mode, .jarvis)
+        await coordinator.cancel()
+    }
+
 }
 
 private final class TestAudioCapture: AudioCaptureService {
@@ -298,6 +368,8 @@ private final class TestRealtimeClient: OpenAIRealtimeClient {
     let events: AsyncStream<RealtimeEvent>
     private let continuation: AsyncStream<RealtimeEvent>.Continuation
     private(set) var eventsSent: [String] = []
+    private(set) var connectCount = 0
+    private(set) var disconnectCount = 0
 
     init() {
         var continuation: AsyncStream<RealtimeEvent>.Continuation!
@@ -305,13 +377,13 @@ private final class TestRealtimeClient: OpenAIRealtimeClient {
         self.continuation = continuation
     }
 
-    func connect(configuration: RealtimeConfiguration) async throws {}
+    func connect(configuration: RealtimeConfiguration) async throws { connectCount += 1 }
     func appendAudio(_ data: Data) async throws {}
     func sendText(_ text: String) async throws {}
     func sendToolOutput(callID: String, output: String) async throws { eventsSent.append("tool_output:\(callID)") }
     func requestResponse() async throws { eventsSent.append("response.create") }
     func interrupt() async { eventsSent.append("interrupt") }
-    func disconnect() async {}
+    func disconnect() async { disconnectCount += 1 }
     func emit(_ event: RealtimeEvent) { continuation.yield(event) }
 }
 

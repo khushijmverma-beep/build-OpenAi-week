@@ -41,6 +41,8 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
     private var inputResponseTask: Task<Void, Never>?
     private var lastOutputTranscript = ""
     private var listeningPaused = false
+    private var jarvisRecoveryTask: Task<Void, Never>?
+    private var jarvisRecoveryAttempts = 0
 
     public init(state: ObservableAssistantStateStore, audioCapture: AudioCaptureService, audioPlayback: AudioPlaybackService, recognizer: LocalSpeechRecognizer, responses: OpenAIResponsesClient, realtime: OpenAIRealtimeClient, delivery: TextDeliveryService, selectedText: SelectedTextProvider, tools: ToolRegistry, executor: ActionExecutor, policy: PermissionPolicy, receiptStore: ActionReceiptStore, settings: SettingsStore) {
         self.state = state; self.audioCapture = audioCapture; self.audioPlayback = audioPlayback; self.recognizer = recognizer; self.responses = responses; self.realtime = realtime; self.delivery = delivery; self.selectedText = selectedText; self.tools = tools; self.executor = executor; self.policy = policy; self.receiptStore = receiptStore; self.settings = settings
@@ -144,6 +146,21 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
 
     private func beginJarvis() async {
         let id = operationID
+        resetJarvisState()
+        state.transition(to: AssistantSnapshot(phase: .connecting, mode: .jarvis, title: settings.settings.assistantName, detail: "Starting live conversation…", cancelHint: "⌃⌥X cancels"))
+        do {
+            guard try await connectJarvisTransport(operationID: id) else { return }
+            state.transition(to: AssistantSnapshot(phase: .listening, mode: .jarvis, title: settings.settings.assistantName, detail: "Talk naturally.", cancelHint: "⌃⌥X cancels"))
+        } catch {
+            if isRecoverableJarvisTransportError(error) {
+                scheduleJarvisRecovery(error, operationID: id)
+            } else {
+                await failJarvis(error, operationID: id, title: "Could not connect")
+            }
+        }
+    }
+
+    private func resetJarvisState() {
         listeningPaused = false
         suppressJarvisInputUntil = nil
         estimatedJarvisPlaybackEnd = nil
@@ -154,22 +171,66 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
         inputResponseTask?.cancel()
         inputResponseTask = nil
         lastOutputTranscript = ""
-        state.transition(to: AssistantSnapshot(phase: .connecting, mode: .jarvis, title: settings.settings.assistantName, detail: "Starting live conversation…", cancelHint: "⌃⌥X cancels"))
+        jarvisRecoveryTask?.cancel()
+        jarvisRecoveryTask = nil
+        jarvisRecoveryAttempts = 0
+    }
+
+    private func jarvisConfiguration() -> RealtimeConfiguration {
+        let selectionContext = invocationSelection?.text.isEmpty == false ? " The user explicitly selected this context before invoking you: \(invocationSelection!.text). Use it only when relevant to their request; do not retain it." : ""
+        let instructions = "You are \(settings.settings.assistantName), a concise macOS assistant. Use typed tools only. Never claim an action succeeded without its returned receipt. When asked to draft or write an email, use compose_email with the desired app, recipient, subject, and body; it opens the compose window, fills each field, and leaves the draft unsent. Never click Send. When asked to type text, use type_text and do not submit the form. Close apps only with close_app; it performs a normal quit and never force-quits. If the user explicitly asks about the screen, use inspect_screen with their question; never capture a screen otherwise. If the user explicitly asks you to click a visible control or button, use click_screen with a precise target such as the search bar, Play, or Skip; never click merely because a control is visible. Screen clicking requires both Screen Recording and Accessibility permission. Never click delete, purchase, submit, send, publish, confirm, or another consequential control without first asking for a fresh confirmation. If the user refers to text currently selected, call get_selected_text before answering so the current selection is read at that moment. When selected text is present and the user asks to translate, summarize, rewrite, or make it professional, produce the transformation and use copy_text so the result is on the clipboard; never replace their selection unless they explicitly ask. When the user explicitly asks to play or pause the active media, use play_media; for an exact Spotify playlist, use play_spotify_playlist only with a Spotify playlist URI or share URL. Ask for the share link if the playlist name is ambiguous. Ask when ambiguous. Require a fresh confirmation for restart, shutdown, purchases, deletion, submission, or other irreversible actions.\(selectionContext)"
+        return RealtimeConfiguration(model: settings.settings.realtimeModel, assistantName: settings.settings.assistantName, instructions: instructions, tools: tools.schemas())
+    }
+
+    private func connectJarvisTransport(operationID id: UUID) async throws -> Bool {
+        try await realtime.connect(configuration: jarvisConfiguration())
+        guard self.operationID == id, activeMode == .jarvis else { return false }
+        configureAudioCallback(for: .jarvis, operationID: id)
+        try audioCapture.start()
+        guard self.operationID == id, activeMode == .jarvis else {
+            audioCapture.stop()
+            return false
+        }
+        let events = realtime.events
+        realtimeTask = Task { [weak self, id] in
+            for await event in events { await self?.handle(event, operationID: id) }
+        }
+        return true
+    }
+
+    private func scheduleJarvisRecovery(_ error: Error, operationID id: UUID) {
+        guard self.operationID == id, activeMode == .jarvis, jarvisRecoveryTask == nil else { return }
+        jarvisRecoveryAttempts += 1
+        let attempt = jarvisRecoveryAttempts
+        state.transition(to: AssistantSnapshot(phase: .connecting, mode: .jarvis, title: settings.settings.assistantName, detail: "Reconnecting…", cancelHint: "⌃⌥X cancels"))
+        jarvisRecoveryTask = Task { [weak self] in
+            let delay = UInt64(min(attempt, 4)) * 250_000_000
+            try? await Task.sleep(nanoseconds: delay)
+            guard !Task.isCancelled else { return }
+            await self?.reconnectJarvis(operationID: id)
+        }
+    }
+
+    private func reconnectJarvis(operationID id: UUID) async {
+        guard self.operationID == id, activeMode == .jarvis else { jarvisRecoveryTask = nil; return }
+        jarvisRecoveryTask = nil
+        realtimeTask?.cancel()
+        realtimeTask = nil
+        audioCapture.onAudioChunk = nil
+        audioCapture.stop()
+        await realtime.disconnect()
         do {
-            let selectionContext = invocationSelection?.text.isEmpty == false ? " The user explicitly selected this context before invoking you: \(invocationSelection!.text). Use it only when relevant to their request; do not retain it." : ""
-            let instructions = "You are \(settings.settings.assistantName), a concise macOS assistant. Use typed tools only. Never claim an action succeeded without its returned receipt. When asked to draft or write an email, use compose_email with the desired app, recipient, subject, and body; it opens the compose window, fills each field, and leaves the draft unsent. Never click Send. When asked to type text, use type_text and do not submit the form. Close apps only with close_app; it performs a normal quit and never force-quits. If the user explicitly asks about the screen, use inspect_screen with their question; never capture a screen otherwise. If the user explicitly asks you to click a visible control or button, use click_screen with a precise target such as the search bar, Play, or Skip; never click merely because a control is visible. Screen clicking requires both Screen Recording and Accessibility permission. Never click delete, purchase, submit, send, publish, confirm, or another consequential control without first asking for a fresh confirmation. If the user refers to text currently selected, call get_selected_text before answering so the current selection is read at that moment. When selected text is present and the user asks to translate, summarize, rewrite, or make it professional, produce the transformation and use copy_text so the result is on the clipboard; never replace their selection unless they explicitly ask. When the user explicitly asks to play or pause the active media, use play_media; for an exact Spotify playlist, use play_spotify_playlist only with a Spotify playlist URI or share URL. Ask for the share link if the playlist name is ambiguous. Ask when ambiguous. Require a fresh confirmation for restart, shutdown, purchases, deletion, submission, or other irreversible actions.\(selectionContext)"
-            try await realtime.connect(configuration: RealtimeConfiguration(model: settings.settings.realtimeModel, assistantName: settings.settings.assistantName, instructions: instructions, tools: tools.schemas()))
-            guard operationID == id, activeMode == .jarvis else { return }
-            configureAudioCallback(for: .jarvis, operationID: id)
-            try audioCapture.start()
-            guard operationID == id, activeMode == .jarvis else { return }
-            let events = realtime.events
-            realtimeTask = Task { [weak self, id] in
-                for await event in events { await self?.handle(event, operationID: id) }
-            }
-            state.transition(to: AssistantSnapshot(phase: .listening, mode: .jarvis, title: settings.settings.assistantName, detail: "Talk naturally.", cancelHint: "⌃⌥X cancels"))
+            guard try await connectJarvisTransport(operationID: id) else { return }
+            jarvisRecoveryAttempts = 0
+            state.transition(to: AssistantSnapshot(phase: .listening, mode: .jarvis, title: settings.settings.assistantName, detail: "Listening again.", cancelHint: "⌃⌥X cancels"))
         } catch {
-            await failJarvis(error, operationID: id, title: "Could not connect")
+            if isRecoverableJarvisTransportError(error) {
+                // Keep the Jarvis session alive through short network/display
+                // transitions. It remains cancellable while the transport retries.
+                scheduleJarvisRecovery(error, operationID: id)
+            } else {
+                await failJarvis(error, operationID: id, title: "Jarvis connection stopped")
+            }
         }
     }
 
@@ -188,7 +249,11 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
             do {
                 try await realtime.appendAudio(data)
             } catch {
-                await failJarvis(error, operationID: operationID, title: "Microphone stream stopped")
+                if isRecoverableJarvisTransportError(error) {
+                    scheduleJarvisRecovery(error, operationID: operationID)
+                } else {
+                    await failJarvis(error, operationID: operationID, title: "Microphone stream stopped")
+                }
             }
         } else {
             await recognizer.append(audio: data)
@@ -270,6 +335,8 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
             // the current response reaches `response.done`.
             if isActiveResponseError(error) {
                 state.transition(to: AssistantSnapshot(phase: .listening, mode: .jarvis, title: settings.settings.assistantName, detail: "Still listening…", cancelHint: "⌃⌥X cancels"))
+            } else if isRecoverableJarvisTransportError(error) {
+                scheduleJarvisRecovery(error, operationID: operationID)
             } else {
                 await failJarvis(error, operationID: operationID, title: "Jarvis connection stopped")
             }
@@ -322,13 +389,16 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
     }
 
     private func cancel(silent: Bool) async {
-        operationID = UUID(); listeningPaused = false; suppressJarvisInputUntil = nil; estimatedJarvisPlaybackEnd = nil; pendingWordInterruption = false; inputTurnTranscript = ""; inputSpeechStopped = false; inputResponseRequested = false; inputResponseTask?.cancel(); inputResponseTask = nil; lastOutputTranscript = ""; audioCapture.onAudioChunk = nil; audioCapture.stop(); audioPlayback.stop(); partialTask?.cancel(); localCompletionTask?.cancel(); realtimeTask?.cancel(); partialTask = nil; localCompletionTask = nil; realtimeTask = nil; localSpeechDetected = false; await recognizer.cancel(); await realtime.disconnect(); activeMode = nil; pendingTool = nil; confirmation = nil; queuedToolCalls.removeAll()
+        operationID = UUID(); jarvisRecoveryTask?.cancel(); jarvisRecoveryTask = nil; jarvisRecoveryAttempts = 0; listeningPaused = false; suppressJarvisInputUntil = nil; estimatedJarvisPlaybackEnd = nil; pendingWordInterruption = false; inputTurnTranscript = ""; inputSpeechStopped = false; inputResponseRequested = false; inputResponseTask?.cancel(); inputResponseTask = nil; lastOutputTranscript = ""; audioCapture.onAudioChunk = nil; audioCapture.stop(); audioPlayback.stop(); partialTask?.cancel(); localCompletionTask?.cancel(); realtimeTask?.cancel(); partialTask = nil; localCompletionTask = nil; realtimeTask = nil; localSpeechDetected = false; await recognizer.cancel(); await realtime.disconnect(); activeMode = nil; pendingTool = nil; confirmation = nil; queuedToolCalls.removeAll()
         if !silent { state.transition(to: AssistantSnapshot(phase: .cancelled, title: "Cancelled", detail: "Nothing else will be typed, spoken, or executed.")) }
     }
 
     private func failJarvis(_ error: Error, operationID: UUID, title: String) async {
         guard self.operationID == operationID else { return }
         self.operationID = UUID()
+        jarvisRecoveryTask?.cancel()
+        jarvisRecoveryTask = nil
+        jarvisRecoveryAttempts = 0
         listeningPaused = false
         suppressJarvisInputUntil = nil
         estimatedJarvisPlaybackEnd = nil
@@ -355,6 +425,13 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
     private func isActiveResponseError(_ error: Error) -> Bool {
         guard case let AppError.realtimeTransport(message) = error else { return false }
         return message.localizedCaseInsensitiveContains("active response in progress")
+    }
+
+    private func isRecoverableJarvisTransportError(_ error: Error) -> Bool {
+        guard case let AppError.realtimeTransport(message) = error else { return false }
+        let text = message.lowercased()
+        if text.contains("rate") || text.contains("authentication") || text.contains("unauthorized") || text.contains("forbidden") || text.contains("invalid") { return false }
+        return text.contains("socket") || text.contains("not connected") || text.contains("connection") || text.contains("network") || text.contains("timed out") || text.contains("timeout") || text.contains("closed")
     }
 
     private var isSuppressingJarvisInput: Bool {

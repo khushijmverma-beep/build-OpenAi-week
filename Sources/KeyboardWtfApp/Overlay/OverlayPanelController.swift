@@ -7,6 +7,8 @@ import SwiftUI
     private let panel: OverlayPanel
     private let store: ObservableAssistantStateStore
     private var observation: AnyCancellable?
+    private var screenObservation: NSObjectProtocol?
+    private var spaceObservation: NSObjectProtocol?
 
     init(store: ObservableAssistantStateStore, coordinator: AssistantCoordinator) {
         self.store = store
@@ -26,6 +28,17 @@ import SwiftUI
             setListeningPaused: { paused in await coordinator.setListeningPaused(paused) }
         ))
         observation = store.$snapshot.receive(on: RunLoop.main).sink { [weak self] snapshot in self?.update(snapshot) }
+        screenObservation = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.repositionIfVisible() }
+        }
+        spaceObservation = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.repositionIfVisible() }
+        }
+    }
+
+    deinit {
+        if let screenObservation { NotificationCenter.default.removeObserver(screenObservation) }
+        if let spaceObservation { NSWorkspace.shared.notificationCenter.removeObserver(spaceObservation) }
     }
 
     private func update(_ snapshot: AssistantSnapshot) {
@@ -34,6 +47,12 @@ import SwiftUI
         panel.ignoresMouseEvents = snapshot.phase != .confirmationRequired && !jarvisCanPause
         position()
         if !panel.isVisible { panel.orderFrontRegardless() }
+    }
+
+    private func repositionIfVisible() {
+        guard panel.isVisible else { return }
+        position()
+        panel.orderFrontRegardless()
     }
 
     private func position() {
