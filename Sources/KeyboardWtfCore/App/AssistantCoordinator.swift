@@ -22,6 +22,11 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
     private var realtimeTask: Task<Void, Never>?
     private var pendingTool: ToolCall?
     private var confirmation: PendingConfirmation?
+    // Realtime emits a tool call before `response.done`.  The API will reject
+    // a tool result sent before that response is complete, so retain calls
+    // until the terminal event arrives.  The key also removes the duplicate
+    // function-call events emitted by different Realtime event variants.
+    private var queuedToolCalls: [String: ToolCall] = [:]
     private var invocationSelection: SelectedTextContext?
     private let pauseDetector = PauseDetector()
     private var localSpeechDetected = false
@@ -52,8 +57,7 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
         self.pendingTool = nil; self.confirmation = nil
         let receipt = await executor.execute(pendingTool, confirmed: true)
         await receiptStore.append(receipt)
-        try? await realtime.sendToolOutput(callID: pendingTool.id, output: receiptJSON(receipt))
-        state.transition(to: AssistantSnapshot(phase: receipt.success ? .executing : .error, mode: .jarvis, title: settings.settings.assistantName, detail: receipt.summary, cancelHint: "⌃⌥X cancels"))
+        await continueAfterToolOutputs([(pendingTool.id, receiptJSON(receipt))], detail: receipt.summary)
     }
 
     private func beginLocalCapture(_ mode: AssistantMode) async {
@@ -176,23 +180,68 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
             state.transition(to: AssistantSnapshot(phase: .thinking, mode: .jarvis, title: settings.settings.assistantName, detail: "Thinking…", cancelHint: "⌃⌥X cancels"))
         case let .inputTranscriptDelta(text): state.updatePartialTranscript(text); if text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "confirm" { await confirmPendingAction() }
         case let .outputTranscriptDelta(text): state.updatePartialTranscript(text)
-        case let .toolCall(call): await execute(call)
-        case let .error(error): await failJarvis(error, operationID: operationID, title: "Jarvis connection stopped")
+        case let .toolCall(call): queue(call)
+        case .responseDone: await executeQueuedTools()
+        case let .error(error):
+            // A stale `response.create` must never tear down an otherwise
+            // healthy voice session.  This is recoverable; the next turn can
+            // continue normally, and the queued tool result is retried once
+            // the current response reaches `response.done`.
+            if isActiveResponseError(error) {
+                state.transition(to: AssistantSnapshot(phase: .listening, mode: .jarvis, title: settings.settings.assistantName, detail: "Still listening…", cancelHint: "⌃⌥X cancels"))
+            } else {
+                await failJarvis(error, operationID: operationID, title: "Jarvis connection stopped")
+            }
         default: break
         }
     }
 
-    private func execute(_ call: ToolCall) async {
-        if policy.requiresConfirmation(for: call.name) {
-            pendingTool = call; confirmation = PendingConfirmation(operation: call.name == .restartMac ? .restart : .shutDown)
-            state.transition(to: AssistantSnapshot(phase: .confirmationRequired, mode: .jarvis, title: "Confirm \(call.name == .restartMac ? "restart" : "shutdown")", detail: "Say “confirm” or click Confirm within 20 seconds.", cancelHint: "⌃⌥X cancels")); return
+    private func queue(_ call: ToolCall) {
+        queuedToolCalls[call.id] = call
+    }
+
+    private func executeQueuedTools() async {
+        guard !queuedToolCalls.isEmpty else { return }
+        let calls = queuedToolCalls.values
+        queuedToolCalls.removeAll()
+        var outputs: [(String, String)] = []
+
+        for call in calls {
+            if policy.requiresConfirmation(for: call.name) {
+                pendingTool = call
+                confirmation = PendingConfirmation(operation: call.name == .restartMac ? .restart : .shutDown)
+                state.transition(to: AssistantSnapshot(phase: .confirmationRequired, mode: .jarvis, title: "Confirm \(call.name == .restartMac ? "restart" : "shutdown")", detail: "Say “confirm” or click Confirm within 20 seconds.", cancelHint: "⌃⌥X cancels"))
+                continue
+            }
+            state.transition(to: AssistantSnapshot(phase: .executing, mode: .jarvis, title: settings.settings.assistantName, detail: "Working…", cancelHint: "⌃⌥X cancels"))
+            let receipt = await executor.execute(call, confirmed: false)
+            await receiptStore.append(receipt)
+            outputs.append((call.id, receiptJSON(receipt)))
         }
-        state.transition(to: AssistantSnapshot(phase: .executing, mode: .jarvis, title: settings.settings.assistantName, detail: "Working…", cancelHint: "⌃⌥X cancels"))
-        let receipt = await executor.execute(call, confirmed: false); await receiptStore.append(receipt); try? await realtime.sendToolOutput(callID: call.id, output: receiptJSON(receipt))
+        guard !outputs.isEmpty else { return }
+        await continueAfterToolOutputs(outputs, detail: "Action finished. Listening for your next request…")
+    }
+
+    private func continueAfterToolOutputs(_ outputs: [(String, String)], detail: String) async {
+        do {
+            // Write every function result before asking Realtime to continue.
+            // Sending response.create between individual outputs causes the
+            // API's “active response in progress” error and used to end Jarvis.
+            for (callID, output) in outputs {
+                try await realtime.sendToolOutput(callID: callID, output: output)
+            }
+            try await realtime.requestResponse()
+            state.transition(to: AssistantSnapshot(phase: .listening, mode: .jarvis, title: settings.settings.assistantName, detail: detail, cancelHint: "⌃⌥X cancels"))
+        } catch {
+            // Keep the microphone and WebSocket alive.  A later Realtime
+            // response-done event or the user's next turn can recover without
+            // forcing them to reopen Jarvis.
+            state.transition(to: AssistantSnapshot(phase: .listening, mode: .jarvis, title: settings.settings.assistantName, detail: "Action finished. Jarvis is still listening.", cancelHint: "⌃⌥X cancels"))
+        }
     }
 
     private func cancel(silent: Bool) async {
-        operationID = UUID(); suppressJarvisInputUntil = nil; estimatedJarvisPlaybackEnd = nil; audioCapture.onAudioChunk = nil; audioCapture.stop(); audioPlayback.stop(); partialTask?.cancel(); localCompletionTask?.cancel(); realtimeTask?.cancel(); partialTask = nil; localCompletionTask = nil; realtimeTask = nil; localSpeechDetected = false; await recognizer.cancel(); await realtime.disconnect(); activeMode = nil; pendingTool = nil; confirmation = nil
+        operationID = UUID(); suppressJarvisInputUntil = nil; estimatedJarvisPlaybackEnd = nil; audioCapture.onAudioChunk = nil; audioCapture.stop(); audioPlayback.stop(); partialTask?.cancel(); localCompletionTask?.cancel(); realtimeTask?.cancel(); partialTask = nil; localCompletionTask = nil; realtimeTask = nil; localSpeechDetected = false; await recognizer.cancel(); await realtime.disconnect(); activeMode = nil; pendingTool = nil; confirmation = nil; queuedToolCalls.removeAll()
         if !silent { state.transition(to: AssistantSnapshot(phase: .cancelled, title: "Cancelled", detail: "Nothing else will be typed, spoken, or executed.")) }
     }
 
@@ -210,7 +259,13 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
         activeMode = nil
         pendingTool = nil
         confirmation = nil
+        queuedToolCalls.removeAll()
         state.transition(to: AssistantSnapshot(phase: .error, mode: .jarvis, title: title, detail: error.localizedDescription))
+    }
+
+    private func isActiveResponseError(_ error: Error) -> Bool {
+        guard case let AppError.realtimeTransport(message) = error else { return false }
+        return message.localizedCaseInsensitiveContains("active response in progress")
     }
 
     private var isSuppressingJarvisInput: Bool {

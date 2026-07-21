@@ -37,6 +37,9 @@ public protocol OpenAIRealtimeClient: AnyObject {
     func appendAudio(_ data: Data) async throws
     func sendText(_ text: String) async throws
     func sendToolOutput(callID: String, output: String) async throws
+    /// Starts a new response only after all function-call outputs for the
+    /// preceding response have been written to the conversation.
+    func requestResponse() async throws
     func interrupt() async
     func disconnect() async
 }

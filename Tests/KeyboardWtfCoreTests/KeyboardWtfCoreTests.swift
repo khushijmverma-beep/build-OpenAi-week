@@ -52,4 +52,174 @@ final class KeyboardWtfCoreTests: XCTestCase {
         ))
         XCTAssertEqual(result.outputText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), "ok")
     }
+
+    func testLiveRealtimeToolRoundTripWhenExplicitlyEnabled() async throws {
+        guard ProcessInfo.processInfo.environment["RUN_LIVE_OPENAI_TESTS"] == "1" else {
+            throw XCTSkip("Live API checks are opt-in.")
+        }
+
+        let client = OpenAIRealtimeWebSocketClient(credentials: KeychainCredentialProvider())
+        let listApps = ToolDefinition(
+            name: .listRunningApps,
+            description: "Return a list of running applications.",
+            parameters: []
+        )
+        try await client.connect(configuration: RealtimeConfiguration(
+            assistantName: "Jarvis test",
+            instructions: "For every user message, call list_running_apps before replying. Do not describe the action yourself.",
+            tools: [listApps]
+        ))
+        defer { Task { await client.disconnect() } }
+
+        try await client.sendText("Run the list_running_apps function now.")
+        var pendingCall: ToolCall?
+        var toolOutputWasSent = false
+        var completed = false
+        let deadline = Date().addingTimeInterval(30)
+
+        for await event in client.events {
+            if Date() > deadline {
+                throw AppError.realtimeTransport("Realtime tool-round-trip test timed out.")
+            }
+            switch event {
+            case let .toolCall(call) where call.name == .listRunningApps:
+                // The server may provide the same function call through two
+                // event variants; only one output belongs in the conversation.
+                if pendingCall == nil { pendingCall = call }
+            case .responseDone where !toolOutputWasSent:
+                guard let pendingCall else { continue }
+                // This ordering is the regression being tested: wait for the
+                // current response to finish, then write its output, then ask
+                // Realtime for the assistant's follow-up response.
+                try await client.sendToolOutput(callID: pendingCall.id, output: #"{"applications":["TestApp"]}"#)
+                try await client.requestResponse()
+                toolOutputWasSent = true
+            case .responseDone where toolOutputWasSent:
+                completed = true
+            case let .error(error):
+                throw error
+            default:
+                break
+            }
+            if completed { break }
+        }
+
+        XCTAssertNotNil(pendingCall)
+        XCTAssertTrue(toolOutputWasSent)
+        XCTAssertTrue(completed)
+    }
+
+    @MainActor
+    func testJarvisDefersToolOutputUntilResponseDone() async throws {
+        let realtime = TestRealtimeClient()
+        let executor = TestActionExecutor()
+        let selectedText = TestSelectedTextProvider()
+        let coordinator = AssistantCoordinator(
+            state: ObservableAssistantStateStore(),
+            audioCapture: TestAudioCapture(),
+            audioPlayback: TestAudioPlayback(),
+            recognizer: TestSpeechRecognizer(),
+            responses: TestResponsesClient(),
+            realtime: realtime,
+            delivery: TextDeliveryService(selectedText: selectedText, clipboard: TestClipboard()),
+            selectedText: selectedText,
+            tools: DefaultToolRegistry(),
+            executor: executor,
+            policy: DefaultPermissionPolicy(),
+            receiptStore: TestReceiptStore(),
+            settings: SettingsStore()
+        )
+
+        await coordinator.start(mode: .jarvis)
+        let toolCall = ToolCall(id: "call_1", name: .openApp, argumentsJSON: #"{"name":"TextEdit"}"#)
+        realtime.emit(.toolCall(toolCall))
+        try await Task.sleep(nanoseconds: 80_000_000)
+        XCTAssertTrue(executor.executedCalls.isEmpty)
+        XCTAssertTrue(realtime.eventsSent.isEmpty)
+
+        realtime.emit(.responseDone)
+        try await Task.sleep(nanoseconds: 80_000_000)
+        XCTAssertEqual(executor.executedCalls, [toolCall])
+        XCTAssertEqual(realtime.eventsSent, ["tool_output:call_1", "response.create"])
+        await coordinator.cancel()
+    }
+}
+
+private final class TestAudioCapture: AudioCaptureService {
+    var onAudioChunk: ((Data, Float) -> Void)?
+    func start() throws {}
+    func stop() {}
+}
+
+private final class TestAudioPlayback: AudioPlaybackService {
+    func enqueuePCM16(_ data: Data) {}
+    func stop() {}
+}
+
+@MainActor
+private final class TestSpeechRecognizer: LocalSpeechRecognizer {
+    private let stream = AsyncStream<String> { $0.finish() }
+    var partialTranscript: AsyncStream<String> { stream }
+    func prepare() async throws {}
+    func startStreaming() async throws {}
+    func append(audio: Data) async {}
+    func finish() async throws -> String { "" }
+    func cancel() async {}
+}
+
+private final class TestResponsesClient: OpenAIResponsesClient {
+    func create(_ request: ResponsesRequest) async throws -> ResponsesResult {
+        ResponsesResult(id: "test", outputText: "", model: request.model, inputTokens: nil, outputTokens: nil)
+    }
+}
+
+private final class TestRealtimeClient: OpenAIRealtimeClient {
+    let events: AsyncStream<RealtimeEvent>
+    private let continuation: AsyncStream<RealtimeEvent>.Continuation
+    private(set) var eventsSent: [String] = []
+
+    init() {
+        var continuation: AsyncStream<RealtimeEvent>.Continuation!
+        events = AsyncStream { continuation = $0 }
+        self.continuation = continuation
+    }
+
+    func connect(configuration: RealtimeConfiguration) async throws {}
+    func appendAudio(_ data: Data) async throws {}
+    func sendText(_ text: String) async throws {}
+    func sendToolOutput(callID: String, output: String) async throws { eventsSent.append("tool_output:\(callID)") }
+    func requestResponse() async throws { eventsSent.append("response.create") }
+    func interrupt() async {}
+    func disconnect() async {}
+    func emit(_ event: RealtimeEvent) { continuation.yield(event) }
+}
+
+private final class TestSelectedTextProvider: SelectedTextProvider {
+    func capture() async -> SelectedTextContext {
+        SelectedTextContext(text: "", applicationName: nil, bundleIdentifier: nil, windowTitle: nil, contentType: nil, method: .unavailable, capturedAt: Date())
+    }
+
+    func replaceSelection(with text: String) async -> ActionReceipt {
+        ActionReceipt(toolName: .replaceSelectedText, requestedTarget: "", success: true, verified: true, summary: "")
+    }
+}
+
+private final class TestClipboard: ClipboardService {
+    private var value: String?
+    func readString() -> String? { value }
+    func writeString(_ value: String) { self.value = value }
+    func withPreservedClipboard<T>(_ action: () async throws -> T) async rethrows -> T { try await action() }
+}
+
+private final class TestActionExecutor: ActionExecutor {
+    private(set) var executedCalls: [ToolCall] = []
+    func execute(_ call: ToolCall, confirmed: Bool) async -> ActionReceipt {
+        executedCalls.append(call)
+        return ActionReceipt(toolName: call.name, requestedTarget: "TextEdit", success: true, verified: true, summary: "Opened TextEdit.")
+    }
+}
+
+private final class TestReceiptStore: ActionReceiptStore {
+    func append(_ receipt: ActionReceipt) async {}
+    func recent(limit: Int) async -> [ActionReceipt] { [] }
 }

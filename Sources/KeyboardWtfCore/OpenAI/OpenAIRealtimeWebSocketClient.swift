@@ -54,11 +54,14 @@ public final class OpenAIRealtimeWebSocketClient: OpenAIRealtimeClient {
 
     public func sendText(_ text: String) async throws {
         try await send(["type": "conversation.item.create", "item": ["type": "message", "role": "user", "content": [["type": "input_text", "text": text]]]])
-        try await send(["type": "response.create"])
+        try await requestResponse()
     }
 
     public func sendToolOutput(callID: String, output: String) async throws {
         try await send(["type": "conversation.item.create", "item": ["type": "function_call_output", "call_id": callID, "output": output]])
+    }
+
+    public func requestResponse() async throws {
         try await send(["type": "response.create"])
     }
 
