@@ -222,12 +222,47 @@ final class KeyboardWtfCoreTests: XCTestCase {
         XCTAssertTrue(realtime.eventsSent.contains("interrupt"))
         await coordinator.cancel()
     }
+
+    @MainActor
+    func testJarvisPauseStopsAndResumesMicrophone() async throws {
+        let realtime = TestRealtimeClient()
+        let capture = TestAudioCapture()
+        let selectedText = TestSelectedTextProvider()
+        let coordinator = AssistantCoordinator(
+            state: ObservableAssistantStateStore(),
+            audioCapture: capture,
+            audioPlayback: TestAudioPlayback(),
+            recognizer: TestSpeechRecognizer(),
+            responses: TestResponsesClient(),
+            realtime: realtime,
+            delivery: TextDeliveryService(selectedText: selectedText, clipboard: TestClipboard()),
+            selectedText: selectedText,
+            tools: DefaultToolRegistry(),
+            executor: TestActionExecutor(),
+            policy: DefaultPermissionPolicy(),
+            receiptStore: TestReceiptStore(),
+            settings: SettingsStore()
+        )
+
+        await coordinator.start(mode: .jarvis)
+        XCTAssertEqual(capture.startCount, 1)
+        let baselineStopCount = capture.stopCount
+        let paused = await coordinator.setListeningPaused(true)
+        XCTAssertTrue(paused)
+        XCTAssertEqual(capture.stopCount, baselineStopCount + 1)
+        let resumed = await coordinator.setListeningPaused(false)
+        XCTAssertTrue(resumed)
+        XCTAssertEqual(capture.startCount, 2)
+        await coordinator.cancel()
+    }
 }
 
 private final class TestAudioCapture: AudioCaptureService {
     var onAudioChunk: ((Data, Float) -> Void)?
-    func start() throws {}
-    func stop() {}
+    private(set) var startCount = 0
+    private(set) var stopCount = 0
+    func start() throws { startCount += 1 }
+    func stop() { stopCount += 1 }
 }
 
 private final class TestAudioPlayback: AudioPlaybackService {

@@ -40,6 +40,7 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
     private var inputResponseRequested = false
     private var inputResponseTask: Task<Void, Never>?
     private var lastOutputTranscript = ""
+    private var listeningPaused = false
 
     public init(state: ObservableAssistantStateStore, audioCapture: AudioCaptureService, audioPlayback: AudioPlaybackService, recognizer: LocalSpeechRecognizer, responses: OpenAIResponsesClient, realtime: OpenAIRealtimeClient, delivery: TextDeliveryService, selectedText: SelectedTextProvider, tools: ToolRegistry, executor: ActionExecutor, policy: PermissionPolicy, receiptStore: ActionReceiptStore, settings: SettingsStore) {
         self.state = state; self.audioCapture = audioCapture; self.audioPlayback = audioPlayback; self.recognizer = recognizer; self.responses = responses; self.realtime = realtime; self.delivery = delivery; self.selectedText = selectedText; self.tools = tools; self.executor = executor; self.policy = policy; self.receiptStore = receiptStore; self.settings = settings
@@ -58,6 +59,27 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
     }
 
     public func cancel() async { await cancel(silent: false) }
+    public func setListeningPaused(_ paused: Bool) async -> Bool {
+        guard activeMode == .jarvis else { return false }
+        guard paused != listeningPaused else { return true }
+
+        if paused {
+            audioCapture.stop()
+            listeningPaused = true
+            state.transition(to: AssistantSnapshot(phase: .listening, mode: .jarvis, title: settings.settings.assistantName, detail: "Listening paused. Press Resume to listen again.", cancelHint: "⌃⌥X cancels"))
+            return true
+        }
+
+        do {
+            try audioCapture.start()
+            listeningPaused = false
+            state.transition(to: AssistantSnapshot(phase: .listening, mode: .jarvis, title: settings.settings.assistantName, detail: "Listening again.", cancelHint: "⌃⌥X cancels"))
+            return true
+        } catch {
+            state.transition(to: AssistantSnapshot(phase: .listening, mode: .jarvis, title: settings.settings.assistantName, detail: "Listening is paused. (error.localizedDescription)", cancelHint: "⌃⌥X cancels"))
+            return false
+        }
+    }
     public func confirmPendingAction() async {
         guard let pendingTool, let confirmation, confirmation.isValid() else { state.transition(to: AssistantSnapshot(phase: .cancelled, title: "Confirmation expired", detail: "Nothing was executed.")); self.pendingTool = nil; self.confirmation = nil; return }
         self.pendingTool = nil; self.confirmation = nil
@@ -122,6 +144,7 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
 
     private func beginJarvis() async {
         let id = operationID
+        listeningPaused = false
         suppressJarvisInputUntil = nil
         estimatedJarvisPlaybackEnd = nil
         pendingWordInterruption = false
@@ -299,13 +322,14 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
     }
 
     private func cancel(silent: Bool) async {
-        operationID = UUID(); suppressJarvisInputUntil = nil; estimatedJarvisPlaybackEnd = nil; pendingWordInterruption = false; inputTurnTranscript = ""; inputSpeechStopped = false; inputResponseRequested = false; inputResponseTask?.cancel(); inputResponseTask = nil; lastOutputTranscript = ""; audioCapture.onAudioChunk = nil; audioCapture.stop(); audioPlayback.stop(); partialTask?.cancel(); localCompletionTask?.cancel(); realtimeTask?.cancel(); partialTask = nil; localCompletionTask = nil; realtimeTask = nil; localSpeechDetected = false; await recognizer.cancel(); await realtime.disconnect(); activeMode = nil; pendingTool = nil; confirmation = nil; queuedToolCalls.removeAll()
+        operationID = UUID(); listeningPaused = false; suppressJarvisInputUntil = nil; estimatedJarvisPlaybackEnd = nil; pendingWordInterruption = false; inputTurnTranscript = ""; inputSpeechStopped = false; inputResponseRequested = false; inputResponseTask?.cancel(); inputResponseTask = nil; lastOutputTranscript = ""; audioCapture.onAudioChunk = nil; audioCapture.stop(); audioPlayback.stop(); partialTask?.cancel(); localCompletionTask?.cancel(); realtimeTask?.cancel(); partialTask = nil; localCompletionTask = nil; realtimeTask = nil; localSpeechDetected = false; await recognizer.cancel(); await realtime.disconnect(); activeMode = nil; pendingTool = nil; confirmation = nil; queuedToolCalls.removeAll()
         if !silent { state.transition(to: AssistantSnapshot(phase: .cancelled, title: "Cancelled", detail: "Nothing else will be typed, spoken, or executed.")) }
     }
 
     private func failJarvis(_ error: Error, operationID: UUID, title: String) async {
         guard self.operationID == operationID else { return }
         self.operationID = UUID()
+        listeningPaused = false
         suppressJarvisInputUntil = nil
         estimatedJarvisPlaybackEnd = nil
         pendingWordInterruption = false

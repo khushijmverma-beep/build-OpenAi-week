@@ -20,13 +20,18 @@ import SwiftUI
         panel.hasShadow = true
         panel.hidesOnDeactivate = false
         panel.animationBehavior = .utilityWindow
-        panel.contentView = NSHostingView(rootView: AssistantOverlayView(store: store, confirm: { Task { await coordinator.confirmPendingAction() } }))
+        panel.contentView = NSHostingView(rootView: AssistantOverlayView(
+            store: store,
+            confirm: { Task { await coordinator.confirmPendingAction() } },
+            setListeningPaused: { paused in await coordinator.setListeningPaused(paused) }
+        ))
         observation = store.$snapshot.receive(on: RunLoop.main).sink { [weak self] snapshot in self?.update(snapshot) }
     }
 
     private func update(_ snapshot: AssistantSnapshot) {
         if snapshot.phase == .idle { panel.orderOut(nil); return }
-        panel.ignoresMouseEvents = snapshot.phase != .confirmationRequired
+        let jarvisCanPause = snapshot.mode == .jarvis && !snapshot.phase.isTerminal && snapshot.phase != .idle
+        panel.ignoresMouseEvents = snapshot.phase != .confirmationRequired && !jarvisCanPause
         position()
         if !panel.isVisible { panel.orderFrontRegardless() }
     }
@@ -47,6 +52,9 @@ private final class OverlayPanel: NSPanel {
 private struct AssistantOverlayView: View {
     @ObservedObject var store: ObservableAssistantStateStore
     let confirm: () -> Void
+    let setListeningPaused: (Bool) async -> Bool
+    @State private var listeningPaused = false
+    @State private var pauseRequestInFlight = false
 
     var body: some View {
         let snapshot = store.snapshot
@@ -62,6 +70,27 @@ private struct AssistantOverlayView: View {
                 if let hint = snapshot.cancelHint { Text(hint).font(.caption).foregroundStyle(.tertiary) }
             }
             Spacer(minLength: 0)
+            if snapshot.mode == .jarvis && !snapshot.phase.isTerminal && snapshot.phase != .idle {
+                Button {
+                    let requestedPause = !listeningPaused
+                    guard !pauseRequestInFlight else { return }
+                    pauseRequestInFlight = true
+                    Task { @MainActor in
+                        if await setListeningPaused(requestedPause) { listeningPaused = requestedPause }
+                        pauseRequestInFlight = false
+                    }
+                } label: {
+                    Image(systemName: listeningPaused ? "mic.slash.fill" : "mic.fill")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .frame(width: 34, height: 34)
+                        .background(Color.white.opacity(0.12), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .disabled(pauseRequestInFlight)
+                .help(listeningPaused ? "Resume listening" : "Pause listening")
+                .accessibilityLabel(listeningPaused ? "Resume listening" : "Pause listening")
+            }
             if !snapshot.phase.isTerminal && snapshot.phase != .idle { ElapsedTime(since: snapshot.startedAt).foregroundStyle(.tertiary).font(.caption.monospacedDigit()) }
         }
         .padding(.horizontal, 20).padding(.vertical, 16)
@@ -70,6 +99,9 @@ private struct AssistantOverlayView: View {
         .overlay(RoundedRectangle(cornerRadius: 17, style: .continuous).strokeBorder(Color.white.opacity(0.16), lineWidth: 1))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(snapshot.title). \(snapshot.detail)")
+        .onChange(of: snapshot.phase) { _, phase in
+            if phase == .connecting || phase == .idle || phase.isTerminal { listeningPaused = false }
+        }
     }
 }
 
