@@ -126,30 +126,29 @@ private struct AssistantOverlayView: View {
 
 private struct StatusOrb: View {
     let tone: OverlayTone; let level: Float; let active: Bool
-    private var color: Color { switch tone { case .purple: return .purple; case .red: return .red; case .blue: return .blue; case .amber: return .orange; case .teal: return .teal; case .green: return .green } }
+    private var accent: Color { switch tone { case .purple: return .indigo; case .red: return .red; case .blue: return .blue; case .amber: return .orange; case .teal: return .teal; case .green: return .green } }
     var body: some View {
         ZStack {
-            // Keep the core sharply defined; the blurred layer is only a subtle glow.
+            // Keep the orb legible at a glance. Phase color is only a faint tint;
+            // the glass surface and white edge carry most of the visual weight.
             Circle()
-                .fill(color.opacity(active ? 0.48 : 0.30))
-                .frame(width: active ? 62 : 56, height: active ? 62 : 56)
-                .blur(radius: active ? 11 : 8)
-            Circle()
-                .fill(
-                    LinearGradient(
-                        colors: [color.opacity(0.98), color.opacity(0.78)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
+                .fill(accent.opacity(active ? 0.13 : 0.07))
                 .frame(width: 48, height: 48)
-                .overlay(Circle().strokeBorder(.white.opacity(0.28), lineWidth: 1))
-                .shadow(color: color.opacity(0.55), radius: 7, y: 2)
+                .blur(radius: 3)
+            Circle()
+                .fill(.thinMaterial)
+                .overlay(Circle().fill(accent.opacity(active ? 0.18 : 0.10)))
+                .frame(width: 44, height: 44)
+                .overlay(Circle().strokeBorder(.white.opacity(0.42), lineWidth: 1))
+                .shadow(color: .black.opacity(0.16), radius: 3, y: 1)
             if active {
-                Circle().fill(.white.opacity(0.96)).frame(width: 12, height: 12)
+                Circle()
+                    .fill(.white.opacity(0.92))
+                    .frame(width: 8, height: 8)
+                    .scaleEffect(0.9 + CGFloat(min(level, 1)) * 0.35)
             }
         }
-        .frame(width: 62, height: 62)
+        .frame(width: 54, height: 54)
         .animation(.easeOut(duration: 0.12), value: level)
     }
 }
