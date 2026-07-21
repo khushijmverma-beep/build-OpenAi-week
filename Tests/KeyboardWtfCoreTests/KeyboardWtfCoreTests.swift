@@ -55,7 +55,14 @@ final class KeyboardWtfCoreTests: XCTestCase {
         XCTAssertTrue(names.contains(.playMedia))
         XCTAssertTrue(names.contains(.clickScreen))
         XCTAssertTrue(names.contains(.composeEmail))
+        XCTAssertTrue(names.contains(.sendEmail))
         XCTAssertTrue(names.contains(.closeAllTabs))
+    }
+
+    func testGmailDraftUsesComposeDeepLinkAndSendIsConfirmationGated() {
+        XCTAssertEqual(MacActionExecutor.gmailComposeURL.absoluteString, "https://mail.google.com/mail/u/0/#compose")
+        XCTAssertTrue(DefaultPermissionPolicy().requiresConfirmation(for: .sendEmail))
+        XCTAssertFalse(DefaultPermissionPolicy().requiresConfirmation(for: .composeEmail))
     }
 
     func testHotkeyNormalizationRepairsMalformedValues() {

@@ -27,6 +27,7 @@ public enum ToolName: String, Codable, CaseIterable, Sendable {
     case inspectScreen = "inspect_screen"
     case clickScreen = "click_screen"
     case composeEmail = "compose_email"
+    case sendEmail = "send_email"
     case takeWebcamPhoto = "take_webcam_photo"
     case setVolume = "set_volume"
     case mute
@@ -79,9 +80,9 @@ public struct ActionReceipt: Codable, Equatable, Identifiable, Sendable {
 }
 
 public enum SystemOperation: String, Codable, CaseIterable, Sendable {
-    case lock, sleep, restart, shutDown
+    case lock, sleep, restart, shutDown, sendEmail
 
-    public var requiresConfirmation: Bool { self == .restart || self == .shutDown }
+    public var requiresConfirmation: Bool { self == .restart || self == .shutDown || self == .sendEmail }
 }
 
 public struct PendingConfirmation: Equatable, Sendable {

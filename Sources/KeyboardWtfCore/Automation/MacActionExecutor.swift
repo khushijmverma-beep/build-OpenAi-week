@@ -122,6 +122,11 @@ public final class MacActionExecutor: ActionExecutor {
         case .composeEmail:
             guard let args = decode(ComposeEmailArguments.self, call), !args.to.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !args.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return invalid(call) }
             return await composeEmail(args)
+        case .sendEmail:
+            guard confirmed else {
+                return ActionReceipt(toolName: .sendEmail, requestedTarget: "open Gmail draft", success: false, verified: false, summary: "Confirmation is required before sending the Gmail draft.", failureCategory: .denied)
+            }
+            return await sendEmail()
         case .takeWebcamPhoto:
             do {
                 let url = try await camera.capturePhoto()
@@ -205,9 +210,10 @@ public final class MacActionExecutor: ActionExecutor {
         let appName = useGmail ? "Gmail" : requestedApp
         var opened = false
         if useGmail {
-            // Gmail is the default for “create an email” so the task starts in
-            // the browser rather than waiting for Mail or another app to open.
-            opened = NSWorkspace.shared.open(URL(string: "https://mail.google.com")!)
+            // Gmail's compose deep link avoids the old vision/API retry loop,
+            // which could make a draft appear frozen while waiting for a
+            // screenshot or a denied Screen Recording permission.
+            opened = NSWorkspace.shared.open(Self.gmailComposeURL)
         } else {
             switch await apps.resolve(appName) {
             case let .resolved(candidate):
@@ -223,14 +229,24 @@ public final class MacActionExecutor: ActionExecutor {
             }
         }
         guard opened else { return composeFailure(args.to, "I could not open \(appName).", started: started, category: .unknown) }
-        try? await Task.sleep(nanoseconds: 700_000_000)
+        try? await Task.sleep(nanoseconds: useGmail ? 1_400_000_000 : 700_000_000)
 
-        let compose = await clickScreenWithRetry(target: useGmail ? "Gmail Compose button" : "Compose button or New Message button", attempts: 12)
-        guard compose.success else { return composeFailure(args.to, "Could not open a compose window: \(compose.summary)", started: started, category: compose.failureCategory, permissionBlocked: compose.permissionBlocked) }
-        try? await Task.sleep(nanoseconds: 350_000_000)
+        if !useGmail {
+            let compose = await clickScreenWithRetry(target: "Compose button or New Message button", attempts: 4)
+            guard compose.success else { return composeFailure(args.to, "Could not open a compose window: \(compose.summary)", started: started, category: compose.failureCategory, permissionBlocked: compose.permissionBlocked) }
+            try? await Task.sleep(nanoseconds: 350_000_000)
 
-        let recipientField = await clickScreenWithRetry(target: useGmail ? "Gmail To recipient field in the open compose window" : "To recipient field in the compose window", attempts: 8)
-        guard recipientField.success else { return composeFailure(args.to, "Could not find the recipient field: \(recipientField.summary)", started: started, category: recipientField.failureCategory, permissionBlocked: recipientField.permissionBlocked) }
+            let recipientField = await clickScreenWithRetry(target: "To recipient field in the compose window", attempts: 4)
+            guard recipientField.success else { return composeFailure(args.to, "Could not find the recipient field: \(recipientField.summary)", started: started, category: recipientField.failureCategory, permissionBlocked: recipientField.permissionBlocked) }
+        }
+
+        guard AXIsProcessTrusted() else {
+            return composeFailure(args.to, "Accessibility permission is required to fill the Gmail draft.", started: started, category: .permission, permissionBlocked: true)
+        }
+
+        // Gmail opens the To field focused from the compose deep link. Keep
+        // every transition explicit and keyboard-driven so Subject can never
+        // be appended to the recipient row.
         let recipient = await delivery.deliver(args.to, mode: .typeIntoFocusedApp)
         guard recipient.success else { return composeFailure(args.to, recipient.summary, started: started, category: recipient.failureCategory, permissionBlocked: recipient.permissionBlocked) }
 
@@ -262,7 +278,24 @@ public final class MacActionExecutor: ActionExecutor {
         }
         let body = await delivery.deliver(args.body, mode: .typeIntoFocusedApp)
         guard body.success else { return composeFailure(args.to, body.summary, started: started, category: body.failureCategory, permissionBlocked: body.permissionBlocked) }
-        return ActionReceipt(toolName: .composeEmail, requestedTarget: args.to, resolvedTarget: appName, success: true, verified: true, summary: "Drafted an email in \(appName) to \(args.to). It was not sent.", startedAt: started, endedAt: Date())
+        return ActionReceipt(toolName: .composeEmail, requestedTarget: args.to, resolvedTarget: appName, success: true, verified: true, summary: "Draft is ready in Gmail: To \(args.to), Subject \(args.subject.isEmpty ? "(no subject)" : args.subject), and the message body are filled. It remains open and unsent. Say ‘send it’ if you want to send it; I will ask for confirmation first.", startedAt: started, endedAt: Date())
+    }
+
+    /// Gmail's compose route opens an authenticated compose window directly.
+    /// Keeping this as a stable URL avoids screen-vision retries for the most
+    /// common email workflow.
+    public static var gmailComposeURL: URL { URL(string: "https://mail.google.com/mail/u/0/#compose")! }
+
+    private func sendEmail() async -> ActionReceipt {
+        let started = Date()
+        guard AXIsProcessTrusted() else {
+            return ActionReceipt(toolName: .sendEmail, requestedTarget: "Gmail Send button", success: false, verified: false, summary: "Accessibility permission is required to send the open Gmail draft.", startedAt: started, endedAt: Date(), failureCategory: .permission, permissionBlocked: true)
+        }
+        let receipt = await clickScreenWithRetry(target: "Gmail Send button", attempts: 3)
+        guard receipt.success else {
+            return ActionReceipt(toolName: .sendEmail, requestedTarget: "Gmail Send button", success: false, verified: false, summary: "I could not verify the Gmail Send button: \(receipt.summary)", startedAt: started, endedAt: Date(), failureCategory: receipt.failureCategory, permissionBlocked: receipt.permissionBlocked)
+        }
+        return ActionReceipt(toolName: .sendEmail, requestedTarget: "Gmail draft", success: true, verified: true, summary: "Sent the open Gmail draft.", startedAt: started, endedAt: Date())
     }
 
     private func clickScreenWithRetry(target: String, attempts: Int = 5) async -> ActionReceipt {

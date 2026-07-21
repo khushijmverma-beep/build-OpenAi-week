@@ -303,15 +303,23 @@ public final class MacWindowController: WindowController {
 
 public final class DefaultPermissionPolicy: PermissionPolicy {
     public init() {}
-    public func requiresConfirmation(for tool: ToolName) -> Bool { tool == .restartMac || tool == .shutDownMac }
+    public func requiresConfirmation(for tool: ToolName) -> Bool { tool == .restartMac || tool == .shutDownMac || tool == .sendEmail }
 }
 
 public final class MacSystemActionService: SystemActionService {
     public init() {}
     public func perform(_ operation: SystemOperation, confirmed: Bool) async -> ActionReceipt {
         let start = Date()
-        if operation.requiresConfirmation && !confirmed { return ActionReceipt(toolName: operation == .restart ? .restartMac : .shutDownMac, requestedTarget: operation.rawValue, success: false, verified: false, summary: "Confirmation is required before \(operation.rawValue).", startedAt: start, endedAt: Date(), failureCategory: .denied) }
-        return ActionReceipt(toolName: operation == .lock ? .lockMac : (operation == .sleep ? .sleepMac : (operation == .restart ? .restartMac : .shutDownMac)), requestedTarget: operation.rawValue, success: false, verified: false, summary: "macOS system power controls are intentionally unavailable until their permission path is verified on this Mac.", startedAt: start, endedAt: Date(), failureCategory: .unsupported, confirmationUsed: confirmed)
+        let tool: ToolName
+        switch operation {
+        case .lock: tool = .lockMac
+        case .sleep: tool = .sleepMac
+        case .restart: tool = .restartMac
+        case .shutDown: tool = .shutDownMac
+        case .sendEmail: tool = .sendEmail
+        }
+        if operation.requiresConfirmation && !confirmed { return ActionReceipt(toolName: tool, requestedTarget: operation.rawValue, success: false, verified: false, summary: "Confirmation is required before \(operation.rawValue).", startedAt: start, endedAt: Date(), failureCategory: .denied) }
+        return ActionReceipt(toolName: tool, requestedTarget: operation.rawValue, success: false, verified: false, summary: "This operation is not handled by the system action service.", startedAt: start, endedAt: Date(), failureCategory: .unsupported, confirmationUsed: confirmed)
     }
 }
 
@@ -341,7 +349,8 @@ public final class DefaultToolRegistry: ToolRegistry {
             ToolDefinition(name: .takeWebcamPhoto, description: "Take one photo with the Mac camera only after the user explicitly asks.", parameters: []),
             ToolDefinition(name: .inspectScreen, description: "Capture and analyze the visible screen only when the user explicitly asks to analyze, explain, or navigate their screen.", parameters: [ToolParameter(name: "question", type: .string, description: "The user's explicit screen-analysis question")]),
             ToolDefinition(name: .clickScreen, description: "After the user explicitly asks to click a visible control, first inspect the current screen, then capture a fresh screen, locate the requested button or control, and click its center. This tool never clicks without a current screenshot. Requires Screen Recording and Accessibility permission. Never use for delete, purchase, submit, send, publish, or other consequential actions without a fresh confirmation.", parameters: [ToolParameter(name: "target", type: .string, description: "The visible button or control to click, such as the search bar, Play, or Skip")]),
-            ToolDefinition(name: .composeEmail, description: "For a request to draft, create, or write a Gmail email, open Gmail, click Compose, and fill fields in this exact order: To recipient, Subject subject line, then message body. Keep to, subject, and body separate; never put subject or body in the To field. Use Gmail keyboard navigation after committing the recipient, leave the draft open and unsent, and never click Send. Requires Screen Recording and Accessibility permission.", parameters: [ToolParameter(name: "app", type: .string, description: "Use gmail for Gmail; omit to default to Gmail", required: false), ToolParameter(name: "to", type: .string, description: "Only the recipient email address or name; never include subject or body"), ToolParameter(name: "subject", type: .string, description: "Only the email subject line; do not put this in to"), ToolParameter(name: "body", type: .string, description: "Only the message body; do not put this in to or subject")]),
+            ToolDefinition(name: .composeEmail, description: "For a request to draft, create, or write a Gmail email, open Gmail's compose window directly and fill fields in this exact order: To recipient, Subject subject line, then message body. Keep to, subject, and body separate; never put subject or body in the To field. Leave the draft open and unsent. This uses Accessibility keyboard input; do not click Send.", parameters: [ToolParameter(name: "app", type: .string, description: "Use gmail for Gmail; omit to default to Gmail", required: false), ToolParameter(name: "to", type: .string, description: "Only the recipient email address or name; never include subject or body"), ToolParameter(name: "subject", type: .string, description: "Only the email subject line; do not put this in to"), ToolParameter(name: "body", type: .string, description: "Only the message body; do not put this in to or subject")]),
+            ToolDefinition(name: .sendEmail, description: "Send the currently open Gmail draft only after the user has explicitly confirmed. This action locates the visible Gmail Send button on a fresh screenshot and never sends without confirmation.", parameters: []),
             ToolDefinition(name: .searchFiles, description: "Search user-approved folders for a filename.", parameters: [ToolParameter(name: "query", type: .string, description: "Filename or phrase")]),
             ToolDefinition(name: .openFile, description: "Open an approved, non-executable local file.", parameters: [ToolParameter(name: "path", type: .string, description: "Absolute file path")]),
             ToolDefinition(name: .openFolder, description: "Open an approved local folder.", parameters: [ToolParameter(name: "path", type: .string, description: "Absolute folder path")]),
