@@ -36,6 +36,7 @@ struct SettingsView: View {
                     TextField("Jarvis", text: Binding(get: { environment.settings.settings.jarvisShortcut }, set: { environment.settings.settings.jarvisShortcut = $0 }))
                     TextField("Cancel", text: Binding(get: { environment.settings.settings.cancelShortcut }, set: { environment.settings.settings.cancelShortcut = $0 }))
                     TextField("Open Settings", text: Binding(get: { environment.settings.settings.settingsShortcut }, set: { environment.settings.settings.settingsShortcut = $0 }))
+                    HStack { Text("Stop speaking"); Spacer(); Text("Control + Option + Command + X").foregroundStyle(.secondary) }
                     HStack { Button("Apply hotkeys") { do { try environment.hotkeys.register(environment.settings.settings) } catch { keyStatus = error.localizedDescription } }; Spacer(); Text("Use Control + Option combinations.").font(.caption).foregroundStyle(.secondary) }
                 }.padding().tabItem { Label("Hotkeys", systemImage: "command") }
                 DataSettingsView(environment: environment).tabItem { Label("Data", systemImage: "externaldrive") }

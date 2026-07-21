@@ -22,6 +22,7 @@ public final class AppEnvironment {
             case .jarvis: await self.coordinator.start(mode: .jarvis)
             case .cancel: await self.coordinator.cancel()
             case .settings: self.presentSettings?()
+            case .stopSpeaking: _ = await self.coordinator.stopSpeakingAndListen()
             }
         }
     }
