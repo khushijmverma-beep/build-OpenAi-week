@@ -50,8 +50,8 @@ public final class GlobalHotkeyService {
         case "K": return UInt32(kVK_ANSI_K)
         case "Q": return UInt32(kVK_ANSI_Q)
         case "X": return UInt32(kVK_ANSI_X)
-        case ",": return UInt32(kVK_ANSI_Comma)
-        default: throw AppError.unsupported("\(shortcut) is not a supported shortcut yet. Use Control + Option with D, K, Q, X, or comma.")
+        case "J": return UInt32(kVK_ANSI_J)
+        default: throw AppError.unsupported("\(shortcut) is not a supported shortcut yet. Use Control + Option with D, K, Q, X, or J.")
         }
     }
 }

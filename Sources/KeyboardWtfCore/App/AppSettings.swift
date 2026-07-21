@@ -19,7 +19,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public init(
         assistantName: String = "Jarvis", deliveryMode: DeliveryMode = .typeIntoFocusedApp,
         dictationShortcut: String = "⌃⌥D", smartWritingShortcut: String = "⌃⌥K", jarvisShortcut: String = "⌃⌥Q",
-        cancelShortcut: String = "⌃⌥X", settingsShortcut: String = "⌃⌥,",
+        cancelShortcut: String = "⌃⌥X", settingsShortcut: String = "⌃⌥J",
         realtimeModel: String = ModelCatalog.default.realtime,
         responsesModel: String = ModelCatalog.default.responses,
         reasoningModel: String = ModelCatalog.default.reasoning,
@@ -46,7 +46,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         smartWritingShortcut = try values.decodeIfPresent(String.self, forKey: .smartWritingShortcut) ?? "⌃⌥K"
         jarvisShortcut = try values.decodeIfPresent(String.self, forKey: .jarvisShortcut) ?? "⌃⌥Q"
         cancelShortcut = try values.decodeIfPresent(String.self, forKey: .cancelShortcut) ?? "⌃⌥X"
-        settingsShortcut = try values.decodeIfPresent(String.self, forKey: .settingsShortcut) ?? "⌃⌥,"
+        settingsShortcut = try values.decodeIfPresent(String.self, forKey: .settingsShortcut) ?? "⌃⌥J"
         realtimeModel = try values.decodeIfPresent(String.self, forKey: .realtimeModel) ?? ModelCatalog.default.realtime
         responsesModel = try values.decodeIfPresent(String.self, forKey: .responsesModel) ?? ModelCatalog.default.responses
         reasoningModel = try values.decodeIfPresent(String.self, forKey: .reasoningModel) ?? ModelCatalog.default.reasoning
@@ -63,7 +63,11 @@ public final class SettingsStore: ObservableObject {
         let directory = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("keyboard.wtf", isDirectory: true)
         try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         url = directory.appendingPathComponent("settings.json")
-        settings = (try? Data(contentsOf: url)).flatMap { try? JSONDecoder().decode(AppSettings.self, from: $0) } ?? AppSettings()
+        var loaded = (try? Data(contentsOf: url)).flatMap { try? JSONDecoder().decode(AppSettings.self, from: $0) } ?? AppSettings()
+        // The initial build used Control-Option-comma for Settings. Migrate it to
+        // the dedicated global shortcut requested for opening keyboard.wtf.
+        if loaded.settingsShortcut == "⌃⌥," { loaded.settingsShortcut = "⌃⌥J" }
+        settings = loaded
     }
     private func persist() { if let data = try? JSONEncoder().encode(settings) { try? data.write(to: url, options: .atomic) } }
 }
