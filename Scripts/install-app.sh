@@ -11,5 +11,7 @@ pkill -f "$root/.build/.*/keyboard-wtf" 2>/dev/null || true
 pkill -f "$destination/Contents/MacOS/keyboard.wtf" 2>/dev/null || true
 rm -rf "$destination"
 ditto "$root/dist/keyboard.wtf.app" "$destination"
-open "$destination"
+# Launch as a fresh menu-bar agent. `-n` avoids LaunchServices returning
+# -600 when the previous ad-hoc-signed instance was just replaced.
+open -n "$destination"
 echo "Installed and launched: $destination"
