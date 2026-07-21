@@ -8,6 +8,7 @@ public final class AppEnvironment {
     public let coordinator: AssistantCoordinator
     public let credentials: CredentialProvider
     public let permissionCenter: PermissionCenter
+    public let launchAtLogin: LaunchAtLoginManager
     public let receiptStore: ActionReceiptStore
     public var presentSettings: (() -> Void)?
     public lazy var hotkeys: GlobalHotkeyService = GlobalHotkeyService { [weak self] action in
@@ -36,6 +37,7 @@ public final class AppEnvironment {
         let appResolver = MacAppResolver()
         let executor = MacActionExecutor(apps: appResolver, delivery: delivery, selectedText: selectedText, clipboard: clipboard, system: MacSystemActionService(), files: BoundedFileSearchService(), windows: MacWindowController(), screen: MacScreenCaptureService(), memory: database, workflows: database)
         permissionCenter = PermissionCenter()
+        launchAtLogin = LaunchAtLoginManager()
         coordinator = AssistantCoordinator(
             state: state,
             audioCapture: AVAudioCapture(),
@@ -51,6 +53,7 @@ public final class AppEnvironment {
             receiptStore: database,
             settings: settings
         )
+        if settings.settings.launchAtLogin { _ = launchAtLogin.setEnabled(true) }
     }
 
     public func testOpenAIConnection() async throws {

@@ -14,6 +14,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var reasoningModel: String
     public var autoExecuteRoutineActions: Bool
     public var wakePhraseEnabled: Bool
+    public var launchAtLogin: Bool
 
     public init(
         assistantName: String = "Jarvis", deliveryMode: DeliveryMode = .typeIntoFocusedApp,
@@ -22,13 +23,36 @@ public struct AppSettings: Codable, Equatable, Sendable {
         realtimeModel: String = ModelCatalog.default.realtime,
         responsesModel: String = ModelCatalog.default.responses,
         reasoningModel: String = ModelCatalog.default.reasoning,
-        autoExecuteRoutineActions: Bool = true, wakePhraseEnabled: Bool = false
+        autoExecuteRoutineActions: Bool = true, wakePhraseEnabled: Bool = false,
+        launchAtLogin: Bool = true
     ) {
         self.assistantName = assistantName; self.deliveryMode = deliveryMode
         self.dictationShortcut = dictationShortcut; self.smartWritingShortcut = smartWritingShortcut; self.jarvisShortcut = jarvisShortcut
         self.cancelShortcut = cancelShortcut; self.settingsShortcut = settingsShortcut
         self.realtimeModel = realtimeModel; self.responsesModel = responsesModel; self.reasoningModel = reasoningModel
-        self.autoExecuteRoutineActions = autoExecuteRoutineActions; self.wakePhraseEnabled = wakePhraseEnabled
+        self.autoExecuteRoutineActions = autoExecuteRoutineActions; self.wakePhraseEnabled = wakePhraseEnabled; self.launchAtLogin = launchAtLogin
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case assistantName, deliveryMode, dictationShortcut, smartWritingShortcut, jarvisShortcut, cancelShortcut, settingsShortcut
+        case realtimeModel, responsesModel, reasoningModel, autoExecuteRoutineActions, wakePhraseEnabled, launchAtLogin
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        assistantName = try values.decodeIfPresent(String.self, forKey: .assistantName) ?? "Jarvis"
+        deliveryMode = try values.decodeIfPresent(DeliveryMode.self, forKey: .deliveryMode) ?? .typeIntoFocusedApp
+        dictationShortcut = try values.decodeIfPresent(String.self, forKey: .dictationShortcut) ?? "⌃⌥D"
+        smartWritingShortcut = try values.decodeIfPresent(String.self, forKey: .smartWritingShortcut) ?? "⌃⌥K"
+        jarvisShortcut = try values.decodeIfPresent(String.self, forKey: .jarvisShortcut) ?? "⌃⌥Q"
+        cancelShortcut = try values.decodeIfPresent(String.self, forKey: .cancelShortcut) ?? "⌃⌥X"
+        settingsShortcut = try values.decodeIfPresent(String.self, forKey: .settingsShortcut) ?? "⌃⌥,"
+        realtimeModel = try values.decodeIfPresent(String.self, forKey: .realtimeModel) ?? ModelCatalog.default.realtime
+        responsesModel = try values.decodeIfPresent(String.self, forKey: .responsesModel) ?? ModelCatalog.default.responses
+        reasoningModel = try values.decodeIfPresent(String.self, forKey: .reasoningModel) ?? ModelCatalog.default.reasoning
+        autoExecuteRoutineActions = try values.decodeIfPresent(Bool.self, forKey: .autoExecuteRoutineActions) ?? true
+        wakePhraseEnabled = try values.decodeIfPresent(Bool.self, forKey: .wakePhraseEnabled) ?? false
+        launchAtLogin = try values.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? true
     }
 }
 
