@@ -17,6 +17,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // This is a menu-bar agent with intentionally transient overlay panels,
+        // so it normally has no document window. Keep the process alive for
+        // global hotkeys and active Jarvis sessions when Spaces/displays change.
+        ProcessInfo.processInfo.disableAutomaticTermination("keyboard.wtf menu bar assistant")
         do {
             let environment = try AppEnvironment(); self.environment = environment
             environment.presentSettings = { [weak self] in self?.showSettings() }

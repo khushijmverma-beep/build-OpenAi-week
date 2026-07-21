@@ -5,6 +5,7 @@
     <key>CFBundleDisplayName</key><string>keyboard.wtf</string>
     <key>CFBundleName</key><string>keyboard.wtf</string>
     <key>LSUIElement</key><true/>
+    <key>NSSupportsAutomaticTermination</key><true/>
     <key>NSMicrophoneUsageDescription</key><string>keyboard.wtf uses the microphone for Dictation, Smart Writing, and live conversations.</string>
     <key>NSCameraUsageDescription</key><string>keyboard.wtf captures a photo only when you ask it to.</string>
     <key>NSSpeechRecognitionUsageDescription</key><string>keyboard.wtf uses on-device speech recognition only when a local model has not been installed.</string>
