@@ -223,26 +223,43 @@ public final class MacActionExecutor: ActionExecutor {
             }
         }
         guard opened else { return composeFailure(args.to, "I could not open \(appName).", started: started, category: .unknown) }
-        try? await Task.sleep(nanoseconds: 300_000_000)
+        try? await Task.sleep(nanoseconds: 700_000_000)
 
-        let compose = await clickScreenWithRetry(target: "Compose button or New Message button")
+        let compose = await clickScreenWithRetry(target: useGmail ? "Gmail Compose button" : "Compose button or New Message button", attempts: 12)
         guard compose.success else { return composeFailure(args.to, "Could not open a compose window: \(compose.summary)", started: started, category: compose.failureCategory, permissionBlocked: compose.permissionBlocked) }
-        try? await Task.sleep(nanoseconds: 120_000_000)
+        try? await Task.sleep(nanoseconds: 350_000_000)
 
-        let recipientField = await clickScreenWithRetry(target: "To recipient field in the compose window")
+        let recipientField = await clickScreenWithRetry(target: useGmail ? "Gmail To recipient field in the open compose window" : "To recipient field in the compose window", attempts: 8)
         guard recipientField.success else { return composeFailure(args.to, "Could not find the recipient field: \(recipientField.summary)", started: started, category: recipientField.failureCategory, permissionBlocked: recipientField.permissionBlocked) }
         let recipient = await delivery.deliver(args.to, mode: .typeIntoFocusedApp)
         guard recipient.success else { return composeFailure(args.to, recipient.summary, started: started, category: recipient.failureCategory, permissionBlocked: recipient.permissionBlocked) }
 
-        if !args.subject.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if useGmail {
+            // Commit Gmail's To chip first. Keyboard navigation then moves
+            // deterministically through Subject and message body; vision clicks
+            // sometimes landed back in the To row and put the subject beside
+            // the recipient.
+            let commitRecipient = await delivery.press(.returnKey)
+            guard commitRecipient.success else { return composeFailure(args.to, "Could not commit the Gmail recipient: \(commitRecipient.summary)", started: started, category: commitRecipient.failureCategory, permissionBlocked: commitRecipient.permissionBlocked) }
+            let subjectTab = await delivery.press(.tab)
+            guard subjectTab.success else { return composeFailure(args.to, "Could not move to the Gmail subject field: \(subjectTab.summary)", started: started, category: subjectTab.failureCategory, permissionBlocked: subjectTab.permissionBlocked) }
+            if !args.subject.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let subject = await delivery.deliver(args.subject, mode: .typeIntoFocusedApp)
+                guard subject.success else { return composeFailure(args.to, subject.summary, started: started, category: subject.failureCategory, permissionBlocked: subject.permissionBlocked) }
+            }
+            let bodyTab = await delivery.press(.tab)
+            guard bodyTab.success else { return composeFailure(args.to, "Could not move to the Gmail message field: \(bodyTab.summary)", started: started, category: bodyTab.failureCategory, permissionBlocked: bodyTab.permissionBlocked) }
+        } else if !args.subject.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let subjectField = await clickScreenWithRetry(target: "Subject field in the compose window")
             guard subjectField.success else { return composeFailure(args.to, "Could not find the subject field: \(subjectField.summary)", started: started, category: subjectField.failureCategory, permissionBlocked: subjectField.permissionBlocked) }
             let subject = await delivery.deliver(args.subject, mode: .typeIntoFocusedApp)
             guard subject.success else { return composeFailure(args.to, subject.summary, started: started, category: subject.failureCategory, permissionBlocked: subject.permissionBlocked) }
         }
 
-        let messageField = await clickScreenWithRetry(target: "message body field in the compose window")
-        guard messageField.success else { return composeFailure(args.to, "Could not find the message field: \(messageField.summary)", started: started, category: messageField.failureCategory, permissionBlocked: messageField.permissionBlocked) }
+        if !useGmail {
+            let messageField = await clickScreenWithRetry(target: "message body field in the compose window")
+            guard messageField.success else { return composeFailure(args.to, "Could not find the message field: \(messageField.summary)", started: started, category: messageField.failureCategory, permissionBlocked: messageField.permissionBlocked) }
+        }
         let body = await delivery.deliver(args.body, mode: .typeIntoFocusedApp)
         guard body.success else { return composeFailure(args.to, body.summary, started: started, category: body.failureCategory, permissionBlocked: body.permissionBlocked) }
         return ActionReceipt(toolName: .composeEmail, requestedTarget: args.to, resolvedTarget: appName, success: true, verified: true, summary: "Drafted an email in \(appName) to \(args.to). It was not sent.", startedAt: started, endedAt: Date())

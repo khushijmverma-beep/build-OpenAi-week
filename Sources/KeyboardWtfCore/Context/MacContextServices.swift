@@ -91,6 +91,21 @@ public final class TextDeliveryService {
         return await selectedText.replaceSelection(with: text)
     }
 
+    public func press(_ key: TextNavigationKey) async -> ActionReceipt {
+        let started = Date()
+        guard AXIsProcessTrusted() else {
+            return ActionReceipt(toolName: .typeText, requestedTarget: key.description, success: false, verified: false, summary: "Accessibility permission is required to move through the focused app.", startedAt: started, endedAt: Date(), failureCategory: .permission, permissionBlocked: true)
+        }
+        let keyCode: CGKeyCode = key == .tab ? 48 : 36
+        guard let source = CGEventSource(stateID: .combinedSessionState),
+              let down = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
+              let up = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false) else {
+            return ActionReceipt(toolName: .typeText, requestedTarget: key.description, success: false, verified: false, summary: "macOS could not create the keyboard event.", startedAt: started, endedAt: Date(), failureCategory: .permission, permissionBlocked: true)
+        }
+        down.post(tap: .cghidEventTap); up.post(tap: .cghidEventTap)
+        return ActionReceipt(toolName: .typeText, requestedTarget: key.description, success: true, verified: true, summary: "Pressed \(key.description).", startedAt: started, endedAt: Date())
+    }
+
     private func typeIntoFocusedApp(_ text: String) async -> ActionReceipt {
         let started = Date()
         guard AXIsProcessTrusted() else {
@@ -105,6 +120,18 @@ public final class TextDeliveryService {
             }
         } catch {
             return ActionReceipt(toolName: .typeText, requestedTarget: "focused app", success: false, verified: false, summary: "Copied text to the clipboard; typing could not be completed.", startedAt: started, endedAt: Date(), failureCategory: .permission, permissionBlocked: true)
+        }
+    }
+}
+
+public enum TextNavigationKey: Sendable, Equatable, CustomStringConvertible {
+    case tab
+    case returnKey
+
+    public var description: String {
+        switch self {
+        case .tab: return "Tab"
+        case .returnKey: return "Return"
         }
     }
 }
