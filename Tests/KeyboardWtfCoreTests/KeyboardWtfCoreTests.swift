@@ -115,6 +115,10 @@ final class KeyboardWtfCoreTests: XCTestCase {
         ))
         defer { Task { await client.disconnect() } }
 
+        // A late/early interruption must be a no-op when the server has no
+        // active response; this used to produce the fatal “no active response”
+        // error shown by the Jarvis overlay.
+        await client.interrupt()
         try await client.sendText("Run the list_running_apps function now.")
         var pendingCall: ToolCall?
         var toolOutputWasSent = false
@@ -151,6 +155,7 @@ final class KeyboardWtfCoreTests: XCTestCase {
         XCTAssertNotNil(pendingCall)
         XCTAssertTrue(toolOutputWasSent)
         XCTAssertTrue(completed)
+        await client.interrupt()
     }
 
     @MainActor
@@ -326,6 +331,35 @@ final class KeyboardWtfCoreTests: XCTestCase {
         realtime.emit(.error(.realtimeTransport("Socket is not connected")))
         try await Task.sleep(nanoseconds: 900_000_000)
         XCTAssertGreaterThanOrEqual(realtime.connectCount, 2)
+        XCTAssertEqual(state.snapshot.phase, .listening)
+        XCTAssertEqual(state.snapshot.mode, .jarvis)
+        await coordinator.cancel()
+    }
+
+    @MainActor
+    func testJarvisIgnoresLateCancellationError() async throws {
+        let realtime = TestRealtimeClient()
+        let selectedText = TestSelectedTextProvider()
+        let state = ObservableAssistantStateStore()
+        let coordinator = AssistantCoordinator(
+            state: state,
+            audioCapture: TestAudioCapture(),
+            audioPlayback: TestAudioPlayback(),
+            recognizer: TestSpeechRecognizer(),
+            responses: TestResponsesClient(),
+            realtime: realtime,
+            delivery: TextDeliveryService(selectedText: selectedText, clipboard: TestClipboard()),
+            selectedText: selectedText,
+            tools: DefaultToolRegistry(),
+            executor: TestActionExecutor(),
+            policy: DefaultPermissionPolicy(),
+            receiptStore: TestReceiptStore(),
+            settings: SettingsStore()
+        )
+
+        await coordinator.start(mode: .jarvis)
+        realtime.emit(.error(.realtimeTransport("Cancellation failed: no active response found")))
+        try await Task.sleep(nanoseconds: 80_000_000)
         XCTAssertEqual(state.snapshot.phase, .listening)
         XCTAssertEqual(state.snapshot.mode, .jarvis)
         await coordinator.cancel()

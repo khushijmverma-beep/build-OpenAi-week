@@ -16,6 +16,7 @@ public final class OpenAIRealtimeWebSocketClient: OpenAIRealtimeClient {
     private var sessionConfigured = false
     private var connectionError: AppError?
     private var connectionID = UUID()
+    private var responseActive = false
 
     public init(credentials: CredentialProvider, session: URLSession = .shared, logger: Logger = RedactingLogger()) {
         var continuation: AsyncStream<RealtimeEvent>.Continuation!
@@ -74,11 +75,20 @@ public final class OpenAIRealtimeWebSocketClient: OpenAIRealtimeClient {
     }
 
     public func requestResponse() async throws {
-        try await send(["type": "response.create"])
+        responseActive = true
+        do {
+            try await send(["type": "response.create"])
+        } catch {
+            responseActive = false
+            throw error
+        }
     }
 
     public func interrupt() async {
-        guard socket != nil else { return }
+        // `response.cancel` is only valid while a response is active. A late
+        // interruption (for example, speech arriving just after response.done)
+        // must be a no-op rather than a server error that tears down Jarvis.
+        guard socket != nil, responseActive else { return }
         try? await send(["type": "response.cancel"])
         if let itemID = lastOutputItemID {
             try? await send(["type": "conversation.item.truncate", "item_id": itemID, "content_index": 0, "audio_end_ms": 0])
@@ -89,7 +99,7 @@ public final class OpenAIRealtimeWebSocketClient: OpenAIRealtimeClient {
         let oldContinuation = continuation
         connectionID = UUID()
         receiver?.cancel(); receiver = nil
-        socket?.cancel(with: .normalClosure, reason: nil); socket = nil; lastOutputItemID = nil; currentResponseAudioBytes = 0; sessionConfigured = false; connectionError = nil
+        socket?.cancel(with: .normalClosure, reason: nil); socket = nil; lastOutputItemID = nil; currentResponseAudioBytes = 0; sessionConfigured = false; connectionError = nil; responseActive = false
         oldContinuation.finish()
         logger.info("realtime.disconnected", metadata: [:])
     }
@@ -153,6 +163,7 @@ public final class OpenAIRealtimeWebSocketClient: OpenAIRealtimeClient {
         case "response.done":
             logger.info("realtime.response_done", metadata: ["audio_bytes": "\(currentResponseAudioBytes)"])
             currentResponseAudioBytes = 0
+            responseActive = false
             continuation.yield(.responseDone)
         case "error":
             let error = object["error"] as? [String: Any]
@@ -160,6 +171,7 @@ public final class OpenAIRealtimeWebSocketClient: OpenAIRealtimeClient {
             let code = error?["code"] as? String ?? "unknown"
             logger.error("realtime.server_error", metadata: ["code": code, "message": message])
             let appError = AppError.realtimeTransport(message)
+            if isBenignResponseControlError(message) { responseActive = false }
             connectionError = appError
             continuation.yield(.error(appError))
         default: break
@@ -237,6 +249,11 @@ public final class OpenAIRealtimeWebSocketClient: OpenAIRealtimeClient {
         if description.contains("401") || description.contains("403") { return .authentication }
         if description.contains("429") { return .rateLimited }
         return .realtimeTransport(error.localizedDescription)
+    }
+
+    private func isBenignResponseControlError(_ message: String) -> Bool {
+        let text = message.lowercased()
+        return text.contains("no active response") || text.contains("cancellation failed")
     }
 }
 

@@ -424,7 +424,7 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
 
     private func isActiveResponseError(_ error: Error) -> Bool {
         guard case let AppError.realtimeTransport(message) = error else { return false }
-        return message.localizedCaseInsensitiveContains("active response in progress")
+        return message.localizedCaseInsensitiveContains("active response in progress") || message.localizedCaseInsensitiveContains("no active response") || message.localizedCaseInsensitiveContains("cancellation failed")
     }
 
     private func isRecoverableJarvisTransportError(_ error: Error) -> Bool {
