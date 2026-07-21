@@ -76,6 +76,7 @@ private struct AssistantOverlayView: View {
     let stopSpeakingAndListen: () async -> Bool
     @State private var listeningPaused = false
     @State private var pauseRequestInFlight = false
+    @State private var stopRequestInFlight = false
 
     var body: some View {
         let snapshot = store.snapshot
@@ -91,45 +92,48 @@ private struct AssistantOverlayView: View {
                 if let hint = snapshot.cancelHint { Text(hint).font(.caption).foregroundStyle(.tertiary) }
             }
             Spacer(minLength: 0)
-            if snapshot.mode == .jarvis && snapshot.phase == .speaking {
-                Button {
-                    guard !pauseRequestInFlight else { return }
-                    pauseRequestInFlight = true
-                    Task { @MainActor in
-                        _ = await stopSpeakingAndListen()
-                        pauseRequestInFlight = false
+            if snapshot.mode == .jarvis && !snapshot.phase.isTerminal && snapshot.phase != .idle {
+                HStack(spacing: 6) {
+                    Button {
+                        guard snapshot.phase == .speaking, !stopRequestInFlight else { return }
+                        stopRequestInFlight = true
+                        Task { @MainActor in
+                            _ = await stopSpeakingAndListen()
+                            stopRequestInFlight = false
+                        }
+                    } label: {
+                        Image(systemName: "speaker.slash.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .frame(width: 32, height: 32)
+                            .background(Color.white.opacity(0.12), in: Circle())
                     }
-                } label: {
-                    Image(systemName: "speaker.slash.fill")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.primary)
-                        .frame(width: 34, height: 34)
-                        .background(Color.white.opacity(0.12), in: Circle())
-                }
-                .buttonStyle(.plain)
-                .disabled(pauseRequestInFlight)
-                .help("Stop speaking and listen")
-                .accessibilityLabel("Stop speaking and listen")
-            } else if snapshot.mode == .jarvis && !snapshot.phase.isTerminal && snapshot.phase != .idle {
-                Button {
-                    let requestedPause = !listeningPaused
-                    guard !pauseRequestInFlight else { return }
-                    pauseRequestInFlight = true
-                    Task { @MainActor in
-                        if await setListeningPaused(requestedPause) { listeningPaused = requestedPause }
-                        pauseRequestInFlight = false
+                    .buttonStyle(.plain)
+                    .disabled(snapshot.phase != .speaking || stopRequestInFlight)
+                    .opacity(snapshot.phase == .speaking ? 1 : 0.45)
+                    .help("Stop speaking and keep listening")
+                    .accessibilityLabel("Stop speaking and keep listening")
+
+                    Button {
+                        let requestedPause = !listeningPaused
+                        guard !pauseRequestInFlight else { return }
+                        pauseRequestInFlight = true
+                        Task { @MainActor in
+                            if await setListeningPaused(requestedPause) { listeningPaused = requestedPause }
+                            pauseRequestInFlight = false
+                        }
+                    } label: {
+                        Image(systemName: listeningPaused ? "mic.slash.fill" : "mic.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .frame(width: 32, height: 32)
+                            .background(Color.white.opacity(0.12), in: Circle())
                     }
-                } label: {
-                    Image(systemName: listeningPaused ? "mic.slash.fill" : "mic.fill")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.primary)
-                        .frame(width: 34, height: 34)
-                        .background(Color.white.opacity(0.12), in: Circle())
+                    .buttonStyle(.plain)
+                    .disabled(pauseRequestInFlight)
+                    .help(listeningPaused ? "Resume listening" : "Pause listening")
+                    .accessibilityLabel(listeningPaused ? "Resume listening" : "Pause listening")
                 }
-                .buttonStyle(.plain)
-                .disabled(pauseRequestInFlight)
-                .help(listeningPaused ? "Resume listening" : "Pause listening")
-                .accessibilityLabel(listeningPaused ? "Resume listening" : "Pause listening")
             }
             if !snapshot.phase.isTerminal && snapshot.phase != .idle { ElapsedTime(since: snapshot.startedAt).foregroundStyle(.tertiary).font(.caption.monospacedDigit()) }
         }

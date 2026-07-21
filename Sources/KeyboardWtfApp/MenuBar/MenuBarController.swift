@@ -17,7 +17,7 @@ final class MenuBarController: NSObject {
         // shortcuts (for example ⌘Q), which is the system Quit command.
         menu.addItem(item("Dictation   ⌃⌥D") { Task { await coordinator.start(mode: .dictation) } })
         menu.addItem(item("Smart Writing   ⌃⌥K") { Task { await coordinator.start(mode: .smartWriting) } })
-        menu.addItem(item("Jarvis   ⌃⌥Q") { Task { await coordinator.start(mode: .jarvis) } })
+        menu.addItem(item("Orisis   ⌃⌥Q") { Task { await coordinator.start(mode: .jarvis) } })
         menu.addItem(.separator())
         menu.addItem(item("Cancel   ⌃⌥X") { Task { await coordinator.cancel() } })
         menu.addItem(item("Settings…   ⌃⌥J", action: openSettings))
