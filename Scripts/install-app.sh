@@ -7,7 +7,9 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 "$root/Scripts/build-app.sh" release
 destination="$HOME/Applications/keyboard.wtf.app"
 mkdir -p "$HOME/Applications"
+pkill -f "$root/.build/.*/keyboard-wtf" 2>/dev/null || true
+pkill -f "$destination/Contents/MacOS/keyboard.wtf" 2>/dev/null || true
 rm -rf "$destination"
 ditto "$root/dist/keyboard.wtf.app" "$destination"
-open -n "$destination"
+open "$destination"
 echo "Installed and launched: $destination"
