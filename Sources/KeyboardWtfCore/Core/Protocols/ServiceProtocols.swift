@@ -98,6 +98,19 @@ public protocol MediaPlaybackController: AnyObject {
 public protocol SpaceController: AnyObject { func switchSpace(direction: Int) async -> ActionReceipt }
 public protocol ScreenCaptureService: AnyObject { func screenshot() async throws -> URL }
 public protocol ScreenAnalyzer: AnyObject { func analyze(imageAt url: URL, question: String) async throws -> String }
+public struct ScreenClickTarget: Codable, Equatable, Sendable {
+    public let found: Bool
+    public let x: Double?
+    public let y: Double?
+    public let label: String?
+    public let confidence: Double?
+
+    public init(found: Bool, x: Double? = nil, y: Double? = nil, label: String? = nil, confidence: Double? = nil) {
+        self.found = found; self.x = x; self.y = y; self.label = label; self.confidence = confidence
+    }
+}
+public protocol ScreenClickTargetResolver: AnyObject { func resolve(imageAt url: URL, target: String) async throws -> ScreenClickTarget }
+public protocol ScreenClickService: AnyObject { func click(target: String) async -> ActionReceipt }
 public protocol CameraCaptureService: AnyObject { func capturePhoto() async throws -> URL }
 public protocol RecordingService: AnyObject { func stopRecording() async -> ActionReceipt }
 public protocol SystemActionService: AnyObject { func perform(_ operation: SystemOperation, confirmed: Bool) async -> ActionReceipt }

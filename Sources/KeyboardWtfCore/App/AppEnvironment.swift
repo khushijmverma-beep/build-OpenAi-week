@@ -39,7 +39,8 @@ public final class AppEnvironment {
         memoryStore = database
         workflowStore = database
         let appResolver = MacAppResolver()
-        let executor = MacActionExecutor(apps: appResolver, delivery: delivery, selectedText: selectedText, clipboard: clipboard, system: MacSystemActionService(), files: BoundedFileSearchService(), windows: MacWindowController(), screen: MacScreenCaptureService(), memory: database, workflows: database, media: MacMediaPlaybackController(), screenAnalyzer: OpenAIScreenAnalyzer(credentials: credentials))
+        let screenCapture = MacScreenCaptureService()
+        let executor = MacActionExecutor(apps: appResolver, delivery: delivery, selectedText: selectedText, clipboard: clipboard, system: MacSystemActionService(), files: BoundedFileSearchService(), windows: MacWindowController(), screen: screenCapture, memory: database, workflows: database, media: MacMediaPlaybackController(), screenAnalyzer: OpenAIScreenAnalyzer(credentials: credentials), screenClick: MacScreenClickService(screen: screenCapture, resolver: OpenAIScreenClickResolver(credentials: credentials, model: settings.settings.responsesModel)))
         permissionCenter = PermissionCenter()
         launchAtLogin = LaunchAtLoginManager()
         coordinator = AssistantCoordinator(

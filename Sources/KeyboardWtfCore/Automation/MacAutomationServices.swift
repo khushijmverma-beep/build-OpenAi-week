@@ -181,7 +181,8 @@ public final class MacScreenCaptureService: ScreenCaptureService {
     public func screenshot() async throws -> URL {
         guard CGPreflightScreenCaptureAccess() else { throw AppError.permission(.screenRecording) }
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-        guard let display = content.displays.first else { throw AppError.unsupported("macOS could not find a display to capture.") }
+        let mainDisplayID = CGMainDisplayID()
+        guard let display = content.displays.first(where: { $0.displayID == mainDisplayID }) ?? content.displays.first else { throw AppError.unsupported("macOS could not find a display to capture.") }
         let configuration = SCStreamConfiguration()
         configuration.width = display.width
         configuration.height = display.height
@@ -200,6 +201,51 @@ public final class MacScreenCaptureService: ScreenCaptureService {
         CGImageDestinationAddImage(destination, image, nil)
         guard CGImageDestinationFinalize(destination) else { throw AppError.unsupported("macOS could not finalise the screenshot.") }
         return url
+    }
+}
+
+/// Locates a requested visible control in one explicit screenshot and posts a
+/// single left click at the returned normalized point. Screen Recording lets
+/// the resolver see the display; Accessibility is separately required to post
+/// the input event to other applications.
+public final class MacScreenClickService: ScreenClickService {
+    private let screen: ScreenCaptureService
+    private let resolver: ScreenClickTargetResolver
+
+    public init(screen: ScreenCaptureService, resolver: ScreenClickTargetResolver) {
+        self.screen = screen
+        self.resolver = resolver
+    }
+
+    public func click(target: String) async -> ActionReceipt {
+        let started = Date()
+        guard AXIsProcessTrusted() else {
+            return ActionReceipt(toolName: .clickScreen, requestedTarget: target, success: false, verified: false, summary: "Accessibility permission is required to click another app's screen.", startedAt: started, endedAt: Date(), failureCategory: .permission, permissionBlocked: true)
+        }
+        do {
+            let url = try await screen.screenshot()
+            defer { try? FileManager.default.removeItem(at: url) }
+            let result = try await resolver.resolve(imageAt: url, target: target)
+            guard result.found, let x = result.x, let y = result.y, x.isFinite, y.isFinite, (0...1).contains(x), (0...1).contains(y) else {
+                return ActionReceipt(toolName: .clickScreen, requestedTarget: target, success: false, verified: false, summary: "I could not find that visible control on the screen.", startedAt: started, endedAt: Date(), failureCategory: .notFound)
+            }
+
+            let bounds = CGDisplayBounds(CGMainDisplayID())
+            let point = CGPoint(x: bounds.minX + bounds.width * x, y: bounds.minY + bounds.height * y)
+            guard let source = CGEventSource(stateID: .combinedSessionState),
+                  let down = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
+                  let up = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left) else {
+                return ActionReceipt(toolName: .clickScreen, requestedTarget: target, success: false, verified: false, summary: "macOS could not create the click event.", startedAt: started, endedAt: Date(), failureCategory: .permission, permissionBlocked: true)
+            }
+            down.post(tap: .cghidEventTap)
+            up.post(tap: .cghidEventTap)
+            let label = result.label?.isEmpty == false ? result.label! : target
+            return ActionReceipt(toolName: .clickScreen, requestedTarget: target, resolvedTarget: label, success: true, verified: true, summary: "Clicked \(label).", startedAt: started, endedAt: Date())
+        } catch AppError.permission {
+            return ActionReceipt(toolName: .clickScreen, requestedTarget: target, success: false, verified: false, summary: "Screen Recording permission is required to locate a control on the screen.", startedAt: started, endedAt: Date(), failureCategory: .permission, permissionBlocked: true)
+        } catch {
+            return ActionReceipt(toolName: .clickScreen, requestedTarget: target, success: false, verified: false, summary: error.localizedDescription, startedAt: started, endedAt: Date(), failureCategory: .unknown)
+        }
     }
 }
 
@@ -280,6 +326,7 @@ public final class DefaultToolRegistry: ToolRegistry {
             ToolDefinition(name: .takeScreenshot, description: "Take an explicit screenshot and save it locally. Requires Screen Recording permission.", parameters: []),
             ToolDefinition(name: .takeWebcamPhoto, description: "Take one photo with the Mac camera only after the user explicitly asks.", parameters: []),
             ToolDefinition(name: .inspectScreen, description: "Capture and analyze the visible screen only when the user explicitly asks to analyze, explain, or navigate their screen.", parameters: [ToolParameter(name: "question", type: .string, description: "The user's explicit screen-analysis question")]),
+            ToolDefinition(name: .clickScreen, description: "After the user explicitly asks to click a visible control, capture the screen, locate the requested button or control, and click its center. Requires Screen Recording and Accessibility permission. Never use for delete, purchase, submit, send, publish, or other consequential actions without a fresh confirmation.", parameters: [ToolParameter(name: "target", type: .string, description: "The visible button or control to click, such as the search bar, Play, or Skip")]),
             ToolDefinition(name: .searchFiles, description: "Search user-approved folders for a filename.", parameters: [ToolParameter(name: "query", type: .string, description: "Filename or phrase")]),
             ToolDefinition(name: .openFile, description: "Open an approved, non-executable local file.", parameters: [ToolParameter(name: "path", type: .string, description: "Absolute file path")]),
             ToolDefinition(name: .openFolder, description: "Open an approved local folder.", parameters: [ToolParameter(name: "path", type: .string, description: "Absolute folder path")]),

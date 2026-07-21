@@ -24,6 +24,7 @@ public enum ToolName: String, Codable, CaseIterable, Sendable {
     case copyText = "copy_text"
     case takeScreenshot = "take_screenshot"
     case inspectScreen = "inspect_screen"
+    case clickScreen = "click_screen"
     case takeWebcamPhoto = "take_webcam_photo"
     case setVolume = "set_volume"
     case mute

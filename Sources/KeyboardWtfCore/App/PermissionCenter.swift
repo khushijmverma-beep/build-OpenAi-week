@@ -26,8 +26,8 @@ public final class PermissionCenter: ObservableObject {
         let screenRecording: PermissionStatus = CGPreflightScreenCaptureAccess() ? .authorized : .denied
         records = [
             PermissionRecord(kind: .microphone, status: microphone, detail: "Voice input for all three modes.", checkedAt: now),
-            PermissionRecord(kind: .accessibility, status: accessibility, detail: "Selected-text capture, insertion, and window control.", checkedAt: now),
-            PermissionRecord(kind: .screenRecording, status: screenRecording, detail: "Explicit screenshots and screen guidance only.", checkedAt: now),
+            PermissionRecord(kind: .accessibility, status: accessibility, detail: "Selected-text capture, insertion, window control, and requested screen clicks.", checkedAt: now),
+            PermissionRecord(kind: .screenRecording, status: screenRecording, detail: "Explicit screenshots, screen guidance, and requested screen clicks only.", checkedAt: now),
             PermissionRecord(kind: .camera, status: camera, detail: "A single photo only when requested.", checkedAt: now),
             PermissionRecord(kind: .automation, status: .unknown, detail: "Limited approved automation actions.", checkedAt: now),
             PermissionRecord(kind: .filesAndFolders, status: .unknown, detail: "User-approved file search roots.", checkedAt: now),

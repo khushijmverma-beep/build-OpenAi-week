@@ -46,6 +46,16 @@ final class KeyboardWtfCoreTests: XCTestCase {
         XCTAssertTrue(names.contains(.typeText))
         XCTAssertTrue(names.contains(.playSpotifyPlaylist))
         XCTAssertTrue(names.contains(.playMedia))
+        XCTAssertTrue(names.contains(.clickScreen))
+    }
+
+    func testScreenClickResolverParsesNormalizedCoordinates() throws {
+        let target = try OpenAIScreenClickResolver.parse(#"{"found":true,"x":0.42,"y":0.73,"label":"Skip","confidence":0.94}"#)
+        XCTAssertTrue(target.found)
+        XCTAssertEqual(target.x, 0.42)
+        XCTAssertEqual(target.y, 0.73)
+        XCTAssertEqual(target.label, "Skip")
+        XCTAssertThrowsError(try OpenAIScreenClickResolver.parse(#"{"found":true,"x":2,"y":0.5}"#))
     }
 
     func testSQLitePersistsMemoryAndWorkflow() async throws {

@@ -10,6 +10,7 @@ public final class MacActionExecutor: ActionExecutor {
     private let files: FileSearchService
     private let windows: WindowController
     private let screen: ScreenCaptureService
+    private let screenClick: ScreenClickService
     private let camera: CameraCaptureService
     private let media: MediaPlaybackController
     private let screenAnalyzer: ScreenAnalyzer
@@ -17,7 +18,7 @@ public final class MacActionExecutor: ActionExecutor {
     private let memory: MemoryStore
     private let workflows: WorkflowStore
     private let decoder = JSONDecoder()
-    public init(apps: AppResolver, delivery: TextDeliveryService, selectedText: SelectedTextProvider, clipboard: ClipboardService, system: SystemActionService, files: FileSearchService, windows: WindowController, screen: ScreenCaptureService, memory: MemoryStore, workflows: WorkflowStore, spotify: SpotifyPlaybackController = MacSpotifyPlaybackController(), media: MediaPlaybackController = MacMediaPlaybackController(), screenAnalyzer: ScreenAnalyzer = UnavailableScreenAnalyzer(), camera: CameraCaptureService = MacCameraCaptureService()) { self.apps = apps; self.delivery = delivery; self.selectedText = selectedText; self.clipboard = clipboard; self.system = system; self.files = files; self.windows = windows; self.screen = screen; self.camera = camera; self.memory = memory; self.workflows = workflows; self.spotify = spotify; self.media = media; self.screenAnalyzer = screenAnalyzer }
+    public init(apps: AppResolver, delivery: TextDeliveryService, selectedText: SelectedTextProvider, clipboard: ClipboardService, system: SystemActionService, files: FileSearchService, windows: WindowController, screen: ScreenCaptureService, memory: MemoryStore, workflows: WorkflowStore, spotify: SpotifyPlaybackController = MacSpotifyPlaybackController(), media: MediaPlaybackController = MacMediaPlaybackController(), screenAnalyzer: ScreenAnalyzer = UnavailableScreenAnalyzer(), screenClick: ScreenClickService = UnavailableScreenClickService(), camera: CameraCaptureService = MacCameraCaptureService()) { self.apps = apps; self.delivery = delivery; self.selectedText = selectedText; self.clipboard = clipboard; self.system = system; self.files = files; self.windows = windows; self.screen = screen; self.screenClick = screenClick; self.camera = camera; self.memory = memory; self.workflows = workflows; self.spotify = spotify; self.media = media; self.screenAnalyzer = screenAnalyzer }
 
     public func execute(_ call: ToolCall, confirmed: Bool) async -> ActionReceipt {
         switch call.name {
@@ -113,6 +114,9 @@ public final class MacActionExecutor: ActionExecutor {
             } catch {
                 return ActionReceipt(toolName: call.name, requestedTarget: "screen", success: false, verified: false, summary: error.localizedDescription, failureCategory: .unknown)
             }
+        case .clickScreen:
+            guard let args = decode(ScreenClickArguments.self, call), !args.target.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return invalid(call) }
+            return await screenClick.click(target: args.target)
         case .takeWebcamPhoto:
             do {
                 let url = try await camera.capturePhoto()
@@ -207,8 +211,16 @@ private struct MemoryArguments: Decodable { let key: String; let value: String }
 private struct WorkflowArguments: Decodable { let name: String; let triggers: String; let steps: String }
 private struct PlaylistArguments: Decodable { let reference: String }
 private struct ScreenQuestionArguments: Decodable { let question: String }
+private struct ScreenClickArguments: Decodable { let target: String }
 
 public final class UnavailableScreenAnalyzer: ScreenAnalyzer {
     public init() {}
     public func analyze(imageAt url: URL, question: String) async throws -> String { throw AppError.unsupported("Screen analysis is unavailable in this configuration.") }
+}
+
+public final class UnavailableScreenClickService: ScreenClickService {
+    public init() {}
+    public func click(target: String) async -> ActionReceipt {
+        ActionReceipt(toolName: .clickScreen, requestedTarget: target, success: false, verified: false, summary: "Screen clicking is unavailable in this configuration.", failureCategory: .unsupported)
+    }
 }
