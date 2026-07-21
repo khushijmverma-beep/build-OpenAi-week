@@ -132,6 +132,31 @@ public final class MacSpotifyPlaybackController: SpotifyPlaybackController {
     }
 }
 
+/// Sends the standard macOS media Play/Pause key to the current media player.
+/// It does not inspect or capture the screen and only runs after Jarvis receives
+/// an explicit play/pause request.
+public final class MacMediaPlaybackController: MediaPlaybackController {
+    public init() {}
+
+    public func play() async -> ActionReceipt {
+        let started = Date()
+        guard AXIsProcessTrusted() else {
+            return ActionReceipt(toolName: .playMedia, requestedTarget: "active media player", success: false, verified: false, summary: "Accessibility permission is required to press the system Play/Pause key.", startedAt: started, endedAt: Date(), failureCategory: .permission, permissionBlocked: true)
+        }
+        let keyCode: Int32 = 16 // NX_KEYTYPE_PLAY
+        let data1 = Int((keyCode << 16) | (0xA << 8))
+        var posted = true
+        for keyDown in [true, false] {
+            guard let event = NSEvent.otherEvent(with: .systemDefined, location: .zero, modifierFlags: NSEvent.ModifierFlags(rawValue: 0xA00), timestamp: 0, windowNumber: 0, context: nil, subtype: 8, data1: data1 | (keyDown ? 0 : 1), data2: -1), let cgEvent = event.cgEvent else {
+                posted = false
+                continue
+            }
+            cgEvent.post(tap: .cghidEventTap)
+        }
+        return ActionReceipt(toolName: .playMedia, requestedTarget: "active media player", success: posted, verified: posted, summary: posted ? "Pressed Play/Pause for the active media player." : "macOS did not accept the Play/Pause key.", startedAt: started, endedAt: Date(), failureCategory: posted ? .none : .permission, permissionBlocked: !posted)
+    }
+}
+
 public final class BoundedFileSearchService: FileSearchService {
     public init() {}
     public func search(query: String, roots: [URL]) async throws -> [URL] {
@@ -241,6 +266,7 @@ public final class DefaultToolRegistry: ToolRegistry {
             ToolDefinition(name: .closeApp, description: "Ask a running macOS application to quit normally. Never force-quit; macOS can request confirmation for unsaved work.", parameters: [ToolParameter(name: "name", type: .string, description: "Application name")]),
             ToolDefinition(name: .openURL, description: "Open a verified http or https URL.", parameters: [ToolParameter(name: "url", type: .string, description: "URL")]),
             ToolDefinition(name: .webSearch, description: "Search the web in the default browser.", parameters: [ToolParameter(name: "query", type: .string, description: "Search query")]),
+            ToolDefinition(name: .playMedia, description: "Press the standard macOS Play/Pause key for the active media player after the user explicitly asks to play or pause media.", parameters: []),
             ToolDefinition(name: .playSpotifyPlaylist, description: "Play an exact Spotify playlist using a spotify:playlist URI or an open.spotify.com/playlist link. If the user only gives a playlist name, ask them for its Spotify share link rather than guessing.", parameters: [ToolParameter(name: "reference", type: .string, description: "Spotify playlist URI or share URL")]),
             ToolDefinition(name: .typeText, description: "Insert text into the focused application without submitting it.", parameters: [ToolParameter(name: "text", type: .string, description: "Text to insert")]),
             ToolDefinition(name: .copyText, description: "Copy text to the clipboard.", parameters: [ToolParameter(name: "text", type: .string, description: "Text to copy")]),

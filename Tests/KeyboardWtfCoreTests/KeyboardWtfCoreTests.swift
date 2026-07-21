@@ -45,6 +45,7 @@ final class KeyboardWtfCoreTests: XCTestCase {
         XCTAssertTrue(names.contains(.closeApp))
         XCTAssertTrue(names.contains(.typeText))
         XCTAssertTrue(names.contains(.playSpotifyPlaylist))
+        XCTAssertTrue(names.contains(.playMedia))
     }
 
     func testSQLitePersistsMemoryAndWorkflow() async throws {

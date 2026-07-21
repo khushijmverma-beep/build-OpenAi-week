@@ -92,6 +92,9 @@ public protocol WindowController: AnyObject {
 public protocol SpotifyPlaybackController: AnyObject {
     func playPlaylist(reference: String) async -> ActionReceipt
 }
+public protocol MediaPlaybackController: AnyObject {
+    func play() async -> ActionReceipt
+}
 public protocol SpaceController: AnyObject { func switchSpace(direction: Int) async -> ActionReceipt }
 public protocol ScreenCaptureService: AnyObject { func screenshot() async throws -> URL }
 public protocol ScreenAnalyzer: AnyObject { func analyze(imageAt url: URL, question: String) async throws -> String }

@@ -11,12 +11,13 @@ public final class MacActionExecutor: ActionExecutor {
     private let windows: WindowController
     private let screen: ScreenCaptureService
     private let camera: CameraCaptureService
+    private let media: MediaPlaybackController
     private let screenAnalyzer: ScreenAnalyzer
     private let spotify: SpotifyPlaybackController
     private let memory: MemoryStore
     private let workflows: WorkflowStore
     private let decoder = JSONDecoder()
-    public init(apps: AppResolver, delivery: TextDeliveryService, selectedText: SelectedTextProvider, clipboard: ClipboardService, system: SystemActionService, files: FileSearchService, windows: WindowController, screen: ScreenCaptureService, memory: MemoryStore, workflows: WorkflowStore, spotify: SpotifyPlaybackController = MacSpotifyPlaybackController(), screenAnalyzer: ScreenAnalyzer = UnavailableScreenAnalyzer(), camera: CameraCaptureService = MacCameraCaptureService()) { self.apps = apps; self.delivery = delivery; self.selectedText = selectedText; self.clipboard = clipboard; self.system = system; self.files = files; self.windows = windows; self.screen = screen; self.camera = camera; self.memory = memory; self.workflows = workflows; self.spotify = spotify; self.screenAnalyzer = screenAnalyzer }
+    public init(apps: AppResolver, delivery: TextDeliveryService, selectedText: SelectedTextProvider, clipboard: ClipboardService, system: SystemActionService, files: FileSearchService, windows: WindowController, screen: ScreenCaptureService, memory: MemoryStore, workflows: WorkflowStore, spotify: SpotifyPlaybackController = MacSpotifyPlaybackController(), media: MediaPlaybackController = MacMediaPlaybackController(), screenAnalyzer: ScreenAnalyzer = UnavailableScreenAnalyzer(), camera: CameraCaptureService = MacCameraCaptureService()) { self.apps = apps; self.delivery = delivery; self.selectedText = selectedText; self.clipboard = clipboard; self.system = system; self.files = files; self.windows = windows; self.screen = screen; self.camera = camera; self.memory = memory; self.workflows = workflows; self.spotify = spotify; self.media = media; self.screenAnalyzer = screenAnalyzer }
 
     public func execute(_ call: ToolCall, confirmed: Bool) async -> ActionReceipt {
         switch call.name {
@@ -59,6 +60,8 @@ public final class MacActionExecutor: ActionExecutor {
             guard let url = URL(string: "https://www.google.com/search?q=\(encoded)") else { return invalid(call) }
             let success = NSWorkspace.shared.open(url)
             return ActionReceipt(toolName: call.name, requestedTarget: args.query, resolvedTarget: url.absoluteString, success: success, verified: success, summary: success ? "Opened web search for \(args.query)." : "Could not open that search.", failureCategory: success ? .none : .unknown)
+        case .playMedia:
+            return await media.play()
         case .typeText:
             guard let args = decode(TextArguments.self, call) else { return invalid(call) }
             let receipt = await delivery.deliver(args.text, mode: .typeIntoFocusedApp)

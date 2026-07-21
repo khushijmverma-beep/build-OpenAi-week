@@ -16,6 +16,7 @@ public enum ToolName: String, Codable, CaseIterable, Sendable {
     case searchFiles = "search_files"
     case openURL = "open_url"
     case webSearch = "web_search"
+    case playMedia = "play_media"
     case playSpotifyPlaylist = "play_spotify_playlist"
     case getSelectedText = "get_selected_text"
     case replaceSelectedText = "replace_selected_text"
