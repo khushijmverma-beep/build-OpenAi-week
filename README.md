@@ -14,7 +14,7 @@ The app is designed for macOS 14+, Swift 6, SwiftUI, AppKit, AVFoundation, Acces
 2. From this folder run `./Scripts/install-app.sh` to build, sign, install, and launch the menu-bar app. If no Apple Development identity is available, the script uses an ad-hoc signature and macOS permissions may need to be re-approved after rebuilding.
 3. Open Settings from the menu-bar item (or press Control + Option + J), add an OpenAI API key, then grant microphone, Accessibility, and Screen Recording permissions as needed.
 
-The key is saved in the macOS Keychain. `OPENAI_API_KEY` is supported only for development and CI. Copy `.env.example`; never commit `.env`.
+The key is saved in the macOS Keychain and cached locally after the one-time migration so ad-hoc rebuilds do not repeatedly prompt. `OPENAI_API_KEY` is supported only for development and CI. Copy `.env.example`; never commit `.env`.
 
 ## Default shortcuts
 

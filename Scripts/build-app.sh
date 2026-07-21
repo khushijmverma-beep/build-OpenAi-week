@@ -31,7 +31,7 @@ if [[ -n "$identity" ]]; then
   echo "Signed with stable development identity: $identity"
 else
   codesign --force --sign - --entitlements "Sources/KeyboardWtfApp/Resources/keyboard.wtf.entitlements" "$app"
-  echo "Warning: no Apple Development signing identity found; ad-hoc signing may make Keychain ask again after the app is rebuilt."
+  echo "Warning: no Apple Development signing identity found; the first Keychain migration may ask once, then the app uses its local cache on later launches."
 fi
 codesign --verify --deep --strict --verbose=2 "$app"
 echo "$app"
