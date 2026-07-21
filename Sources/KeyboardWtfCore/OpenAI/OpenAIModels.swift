@@ -40,6 +40,7 @@ public enum RealtimeEvent: Equatable, Sendable {
     case connected
     case sessionUpdated
     case inputTranscriptDelta(String)
+    case inputTranscriptCompleted(String)
     case outputAudio(Data)
     case outputTranscriptDelta(String)
     case toolCall(ToolCall)

@@ -128,6 +128,8 @@ public final class OpenAIRealtimeWebSocketClient: OpenAIRealtimeClient {
             if let delta = object["delta"] as? String { continuation.yield(.outputTranscriptDelta(delta)) }
         case "conversation.item.input_audio_transcription.delta":
             if let delta = object["delta"] as? String { continuation.yield(.inputTranscriptDelta(delta)) }
+        case "conversation.item.input_audio_transcription.completed":
+            if let transcript = object["transcript"] as? String { continuation.yield(.inputTranscriptCompleted(transcript)) }
         case "response.output_item.done":
             if let item = object["item"] as? [String: Any], item["type"] as? String == "function_call", let id = item["call_id"] as? String, let name = item["name"] as? String, let tool = ToolName(rawValue: name), let arguments = item["arguments"] as? String { continuation.yield(.toolCall(ToolCall(id: id, name: tool, argumentsJSON: arguments))) }
         case "response.function_call_arguments.done":
@@ -193,12 +195,18 @@ public final class OpenAIRealtimeWebSocketClient: OpenAIRealtimeClient {
                             "threshold": 0.75,
                             "prefix_padding_ms": 300,
                             "silence_duration_ms": 900,
-                            "create_response": true,
-                            "interrupt_response": true
+                            // The coordinator waits for an actual input
+                            // transcription before creating or interrupting a
+                            // response. Raw VAD starts can be noise or echo.
+                            "create_response": false,
+                            "interrupt_response": false
                         ],
                         // A MacBook microphone is normally several inches from the
                         // speaker, so favour far-field filtering over reacting to room noise.
-                        "noise_reduction": ["type": "far_field"]
+                        "noise_reduction": ["type": "far_field"],
+                        // Input transcription is a separate ASR signal used only
+                        // as a word gate for interruption and turn creation.
+                        "transcription": ["model": "gpt-4o-mini-transcribe", "language": "en"]
                     ],
                     "output": ["format": ["type": "audio/pcm", "rate": 24_000], "voice": configuration.voice]
                 ],

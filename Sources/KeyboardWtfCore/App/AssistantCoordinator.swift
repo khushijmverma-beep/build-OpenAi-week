@@ -34,6 +34,12 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
     // microphone as a new user turn while Jarvis is talking.
     private var suppressJarvisInputUntil: Date?
     private var estimatedJarvisPlaybackEnd: Date?
+    private var pendingWordInterruption = false
+    private var inputTurnTranscript = ""
+    private var inputSpeechStopped = false
+    private var inputResponseRequested = false
+    private var inputResponseTask: Task<Void, Never>?
+    private var lastOutputTranscript = ""
 
     public init(state: ObservableAssistantStateStore, audioCapture: AudioCaptureService, audioPlayback: AudioPlaybackService, recognizer: LocalSpeechRecognizer, responses: OpenAIResponsesClient, realtime: OpenAIRealtimeClient, delivery: TextDeliveryService, selectedText: SelectedTextProvider, tools: ToolRegistry, executor: ActionExecutor, policy: PermissionPolicy, receiptStore: ActionReceiptStore, settings: SettingsStore) {
         self.state = state; self.audioCapture = audioCapture; self.audioPlayback = audioPlayback; self.recognizer = recognizer; self.responses = responses; self.realtime = realtime; self.delivery = delivery; self.selectedText = selectedText; self.tools = tools; self.executor = executor; self.policy = policy; self.receiptStore = receiptStore; self.settings = settings
@@ -118,6 +124,13 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
         let id = operationID
         suppressJarvisInputUntil = nil
         estimatedJarvisPlaybackEnd = nil
+        pendingWordInterruption = false
+        inputTurnTranscript = ""
+        inputSpeechStopped = false
+        inputResponseRequested = false
+        inputResponseTask?.cancel()
+        inputResponseTask = nil
+        lastOutputTranscript = ""
         state.transition(to: AssistantSnapshot(phase: .connecting, mode: .jarvis, title: settings.settings.assistantName, detail: "Starting live conversation…", cancelHint: "⌃⌥X cancels"))
         do {
             let selectionContext = invocationSelection?.text.isEmpty == false ? " The user explicitly selected this context before invoking you: \(invocationSelection!.text). Use it only when relevant to their request; do not retain it." : ""
@@ -149,7 +162,6 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
         guard self.operationID == operationID, activeMode == mode else { return }
         state.updateMicrophoneLevel(level)
         if mode == .jarvis {
-            if isSuppressingJarvisInput { return }
             do {
                 try await realtime.appendAudio(data)
             } catch {
@@ -170,16 +182,62 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
             audioPlayback.enqueuePCM16(data)
             state.transition(to: AssistantSnapshot(phase: .speaking, mode: .jarvis, title: settings.settings.assistantName, detail: "Speaking…", cancelHint: "⌃⌥X cancels"))
         case .inputSpeechStarted:
-            guard !isSuppressingJarvisInput else { return }
-            audioPlayback.stop()
-            estimatedJarvisPlaybackEnd = nil
-            suppressJarvisInputUntil = nil
-            state.transition(to: AssistantSnapshot(phase: .listening, mode: .jarvis, title: settings.settings.assistantName, detail: "Listening…", cancelHint: "⌃⌥X cancels"))
+            inputTurnTranscript = ""
+            inputSpeechStopped = false
+            inputResponseRequested = false
+            inputResponseTask?.cancel()
+            inputResponseTask = nil
+            pendingWordInterruption = state.snapshot.phase == .speaking || isSuppressingJarvisInput
+            if !pendingWordInterruption {
+                state.transition(to: AssistantSnapshot(phase: .listening, mode: .jarvis, title: settings.settings.assistantName, detail: "Listening…", cancelHint: "⌃⌥X cancels"))
+            }
         case .inputSpeechStopped:
-            guard !isSuppressingJarvisInput else { return }
-            state.transition(to: AssistantSnapshot(phase: .thinking, mode: .jarvis, title: settings.settings.assistantName, detail: "Thinking…", cancelHint: "⌃⌥X cancels"))
-        case let .inputTranscriptDelta(text): state.updatePartialTranscript(text); if text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "confirm" { await confirmPendingAction() }
-        case let .outputTranscriptDelta(text): state.updatePartialTranscript(text)
+            inputSpeechStopped = true
+            // Transcription is asynchronous and may arrive just after VAD
+            // reports speech stopped. Give it a short grace period, then only
+            // create a response if meaningful words were transcribed.
+            inputResponseTask?.cancel()
+            inputResponseTask = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                guard !Task.isCancelled else { return }
+                await self?.requestResponseForInputTurn()
+            }
+        case let .inputTranscriptDelta(text):
+            inputTurnTranscript += text
+            state.updatePartialTranscript(inputTurnTranscript)
+            if pendingWordInterruption && hasMeaningfulWords(inputTurnTranscript) && !isLikelyOutputEcho(inputTurnTranscript) {
+                pendingWordInterruption = false
+                audioPlayback.stop()
+                estimatedJarvisPlaybackEnd = nil
+                suppressJarvisInputUntil = nil
+                await realtime.interrupt()
+                state.transition(to: AssistantSnapshot(phase: .listening, mode: .jarvis, title: settings.settings.assistantName, detail: "Listening…", cancelHint: "⌃⌥X cancels"))
+            }
+            if inputTurnTranscript.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "confirm" { await confirmPendingAction() }
+            if inputSpeechStopped { await requestResponseForInputTurn() }
+        case let .inputTranscriptCompleted(text):
+            // The final transcript can correct earlier deltas, so use it as
+            // the authoritative turn text before deciding whether to speak.
+            // Final events can arrive out of order across turns; deltas are
+            // the interruption path, while a completion is only accepted
+            // after this turn's VAD stop.
+            guard inputSpeechStopped else { return }
+            inputTurnTranscript = text
+            state.updatePartialTranscript(text)
+            if pendingWordInterruption && hasMeaningfulWords(inputTurnTranscript) && !isLikelyOutputEcho(inputTurnTranscript) {
+                pendingWordInterruption = false
+                audioPlayback.stop()
+                estimatedJarvisPlaybackEnd = nil
+                suppressJarvisInputUntil = nil
+                await realtime.interrupt()
+                state.transition(to: AssistantSnapshot(phase: .listening, mode: .jarvis, title: settings.settings.assistantName, detail: "Listening…", cancelHint: "⌃⌥X cancels"))
+            }
+            if inputTurnTranscript.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "confirm" { await confirmPendingAction() }
+            if inputSpeechStopped { await requestResponseForInputTurn() }
+        case let .outputTranscriptDelta(text):
+            lastOutputTranscript += text
+            if lastOutputTranscript.count > 600 { lastOutputTranscript = String(lastOutputTranscript.suffix(600)) }
+            state.updatePartialTranscript(text)
         case let .toolCall(call): queue(call)
         case .responseDone: await executeQueuedTools()
         case let .error(error):
@@ -241,7 +299,7 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
     }
 
     private func cancel(silent: Bool) async {
-        operationID = UUID(); suppressJarvisInputUntil = nil; estimatedJarvisPlaybackEnd = nil; audioCapture.onAudioChunk = nil; audioCapture.stop(); audioPlayback.stop(); partialTask?.cancel(); localCompletionTask?.cancel(); realtimeTask?.cancel(); partialTask = nil; localCompletionTask = nil; realtimeTask = nil; localSpeechDetected = false; await recognizer.cancel(); await realtime.disconnect(); activeMode = nil; pendingTool = nil; confirmation = nil; queuedToolCalls.removeAll()
+        operationID = UUID(); suppressJarvisInputUntil = nil; estimatedJarvisPlaybackEnd = nil; pendingWordInterruption = false; inputTurnTranscript = ""; inputSpeechStopped = false; inputResponseRequested = false; inputResponseTask?.cancel(); inputResponseTask = nil; lastOutputTranscript = ""; audioCapture.onAudioChunk = nil; audioCapture.stop(); audioPlayback.stop(); partialTask?.cancel(); localCompletionTask?.cancel(); realtimeTask?.cancel(); partialTask = nil; localCompletionTask = nil; realtimeTask = nil; localSpeechDetected = false; await recognizer.cancel(); await realtime.disconnect(); activeMode = nil; pendingTool = nil; confirmation = nil; queuedToolCalls.removeAll()
         if !silent { state.transition(to: AssistantSnapshot(phase: .cancelled, title: "Cancelled", detail: "Nothing else will be typed, spoken, or executed.")) }
     }
 
@@ -250,6 +308,13 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
         self.operationID = UUID()
         suppressJarvisInputUntil = nil
         estimatedJarvisPlaybackEnd = nil
+        pendingWordInterruption = false
+        inputTurnTranscript = ""
+        inputSpeechStopped = false
+        inputResponseRequested = false
+        inputResponseTask?.cancel()
+        inputResponseTask = nil
+        lastOutputTranscript = ""
         audioCapture.onAudioChunk = nil
         audioCapture.stop()
         audioPlayback.stop()
@@ -271,6 +336,34 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
     private var isSuppressingJarvisInput: Bool {
         guard let suppressJarvisInputUntil else { return false }
         return Date() < suppressJarvisInputUntil
+    }
+
+    private func requestResponseForInputTurn() async {
+        guard inputSpeechStopped, !inputResponseRequested, hasMeaningfulWords(inputTurnTranscript), !isLikelyOutputEcho(inputTurnTranscript) else { return }
+        inputResponseRequested = true
+        do {
+            try await realtime.requestResponse()
+            state.transition(to: AssistantSnapshot(phase: .thinking, mode: .jarvis, title: settings.settings.assistantName, detail: "Thinking…", cancelHint: "⌃⌥X cancels"))
+        } catch {
+            inputResponseRequested = false
+            state.transition(to: AssistantSnapshot(phase: .listening, mode: .jarvis, title: settings.settings.assistantName, detail: "Still listening…", cancelHint: "⌃⌥X cancels"))
+        }
+    }
+
+    private func hasMeaningfulWords(_ text: String) -> Bool {
+        let noiseTokens: Set<String> = ["uh", "um", "erm", "er", "hmm", "mm", "ah"]
+        return text.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).contains { word in
+            let token = word.lowercased()
+            return token.count >= 2 && !noiseTokens.contains(token)
+        }
+    }
+
+    private func isLikelyOutputEcho(_ input: String) -> Bool {
+        let normalize: (String) -> String = { $0.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).joined(separator: " ") }
+        let candidate = normalize(input)
+        let output = normalize(lastOutputTranscript)
+        guard candidate.count >= 4, output.count >= 8 else { return false }
+        return output.contains(candidate)
     }
 
     private func suppressJarvisInput(for audio: Data) {

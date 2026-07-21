@@ -170,6 +170,47 @@ final class KeyboardWtfCoreTests: XCTestCase {
         XCTAssertEqual(realtime.eventsSent, ["tool_output:call_1", "response.create"])
         await coordinator.cancel()
     }
+
+    @MainActor
+    func testJarvisInterruptsOnlyAfterMeaningfulWords() async throws {
+        let realtime = TestRealtimeClient()
+        let playback = TestAudioPlayback()
+        let selectedText = TestSelectedTextProvider()
+        let coordinator = AssistantCoordinator(
+            state: ObservableAssistantStateStore(),
+            audioCapture: TestAudioCapture(),
+            audioPlayback: playback,
+            recognizer: TestSpeechRecognizer(),
+            responses: TestResponsesClient(),
+            realtime: realtime,
+            delivery: TextDeliveryService(selectedText: selectedText, clipboard: TestClipboard()),
+            selectedText: selectedText,
+            tools: DefaultToolRegistry(),
+            executor: TestActionExecutor(),
+            policy: DefaultPermissionPolicy(),
+            receiptStore: TestReceiptStore(),
+            settings: SettingsStore()
+        )
+
+        await coordinator.start(mode: .jarvis)
+        let baselineStopCount = playback.stopCount
+        realtime.emit(.outputAudio(Data(repeating: 0, count: 4)))
+        realtime.emit(.inputSpeechStarted)
+        try await Task.sleep(nanoseconds: 80_000_000)
+        XCTAssertEqual(playback.stopCount, baselineStopCount)
+        XCTAssertFalse(realtime.eventsSent.contains("interrupt"))
+
+        realtime.emit(.inputTranscriptDelta(" um"))
+        try await Task.sleep(nanoseconds: 80_000_000)
+        XCTAssertEqual(playback.stopCount, baselineStopCount)
+        XCTAssertFalse(realtime.eventsSent.contains("interrupt"))
+
+        realtime.emit(.inputTranscriptDelta(" stop"))
+        try await Task.sleep(nanoseconds: 80_000_000)
+        XCTAssertEqual(playback.stopCount, baselineStopCount + 1)
+        XCTAssertTrue(realtime.eventsSent.contains("interrupt"))
+        await coordinator.cancel()
+    }
 }
 
 private final class TestAudioCapture: AudioCaptureService {
@@ -179,8 +220,9 @@ private final class TestAudioCapture: AudioCaptureService {
 }
 
 private final class TestAudioPlayback: AudioPlaybackService {
+    private(set) var stopCount = 0
     func enqueuePCM16(_ data: Data) {}
-    func stop() {}
+    func stop() { stopCount += 1 }
 }
 
 @MainActor
@@ -216,7 +258,7 @@ private final class TestRealtimeClient: OpenAIRealtimeClient {
     func sendText(_ text: String) async throws {}
     func sendToolOutput(callID: String, output: String) async throws { eventsSent.append("tool_output:\(callID)") }
     func requestResponse() async throws { eventsSent.append("response.create") }
-    func interrupt() async {}
+    func interrupt() async { eventsSent.append("interrupt") }
     func disconnect() async {}
     func emit(_ event: RealtimeEvent) { continuation.yield(event) }
 }
