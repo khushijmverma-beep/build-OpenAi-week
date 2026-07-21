@@ -117,6 +117,9 @@ public final class MacActionExecutor: ActionExecutor {
         case .clickScreen:
             guard let args = decode(ScreenClickArguments.self, call), !args.target.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return invalid(call) }
             return await screenClick.click(target: args.target)
+        case .composeEmail:
+            guard let args = decode(ComposeEmailArguments.self, call), !args.to.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !args.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return invalid(call) }
+            return await composeEmail(args)
         case .takeWebcamPhoto:
             do {
                 let url = try await camera.capturePhoto()
@@ -193,6 +196,54 @@ public final class MacActionExecutor: ActionExecutor {
         }
     }
 
+    private func composeEmail(_ args: ComposeEmailArguments) async -> ActionReceipt {
+        let started = Date()
+        let appName = args.app?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? args.app!.trimmingCharacters(in: .whitespacesAndNewlines) : "Mail"
+        var opened = false
+        switch await apps.resolve(appName) {
+        case let .resolved(candidate):
+            let openReceipt = await apps.open(candidate)
+            opened = openReceipt.success
+            if !opened { opened = (await apps.focus(candidate)).success }
+        case .notFound where appName.localizedCaseInsensitiveContains("gmail"):
+            opened = NSWorkspace.shared.open(URL(string: "https://mail.google.com")!)
+        case .notFound where appName.localizedCaseInsensitiveContains("outlook"):
+            opened = NSWorkspace.shared.open(URL(string: "https://outlook.live.com/mail")!)
+        case let .ambiguous(candidates):
+            return composeFailure(args.to, "I found multiple email apps: \(candidates.map { $0.name }.joined(separator: ", ")).", started: started, category: .ambiguous)
+        case .notFound:
+            return composeFailure(args.to, "I could not find the email app \(appName).", started: started, category: .notFound)
+        }
+        guard opened else { return composeFailure(args.to, "I could not open \(appName).", started: started, category: .unknown) }
+        try? await Task.sleep(nanoseconds: 450_000_000)
+
+        let compose = await screenClick.click(target: "Compose button or New Message button")
+        guard compose.success else { return composeFailure(args.to, "Could not open a compose window: \(compose.summary)", started: started, category: compose.failureCategory, permissionBlocked: compose.permissionBlocked) }
+        try? await Task.sleep(nanoseconds: 180_000_000)
+
+        let recipientField = await screenClick.click(target: "To recipient field in the compose window")
+        guard recipientField.success else { return composeFailure(args.to, "Could not find the recipient field: \(recipientField.summary)", started: started, category: recipientField.failureCategory, permissionBlocked: recipientField.permissionBlocked) }
+        let recipient = await delivery.deliver(args.to, mode: .typeIntoFocusedApp)
+        guard recipient.success else { return composeFailure(args.to, recipient.summary, started: started, category: recipient.failureCategory, permissionBlocked: recipient.permissionBlocked) }
+
+        if !args.subject.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let subjectField = await screenClick.click(target: "Subject field in the compose window")
+            guard subjectField.success else { return composeFailure(args.to, "Could not find the subject field: \(subjectField.summary)", started: started, category: subjectField.failureCategory, permissionBlocked: subjectField.permissionBlocked) }
+            let subject = await delivery.deliver(args.subject, mode: .typeIntoFocusedApp)
+            guard subject.success else { return composeFailure(args.to, subject.summary, started: started, category: subject.failureCategory, permissionBlocked: subject.permissionBlocked) }
+        }
+
+        let messageField = await screenClick.click(target: "message body field in the compose window")
+        guard messageField.success else { return composeFailure(args.to, "Could not find the message field: \(messageField.summary)", started: started, category: messageField.failureCategory, permissionBlocked: messageField.permissionBlocked) }
+        let body = await delivery.deliver(args.body, mode: .typeIntoFocusedApp)
+        guard body.success else { return composeFailure(args.to, body.summary, started: started, category: body.failureCategory, permissionBlocked: body.permissionBlocked) }
+        return ActionReceipt(toolName: .composeEmail, requestedTarget: args.to, resolvedTarget: appName, success: true, verified: true, summary: "Drafted an email in \(appName) to \(args.to). It was not sent.", startedAt: started, endedAt: Date())
+    }
+
+    private func composeFailure(_ target: String, _ summary: String, started: Date, category: FailureCategory, permissionBlocked: Bool = false) -> ActionReceipt {
+        ActionReceipt(toolName: .composeEmail, requestedTarget: target, success: false, verified: false, summary: summary, startedAt: started, endedAt: Date(), failureCategory: category, permissionBlocked: permissionBlocked)
+    }
+
     private func decode<T: Decodable>(_ type: T.Type, _ call: ToolCall) -> T? { try? decoder.decode(type, from: Data(call.argumentsJSON.utf8)) }
     private func invalid(_ call: ToolCall) -> ActionReceipt { ActionReceipt(toolName: call.name, requestedTarget: "", success: false, verified: false, summary: "The requested action had invalid arguments.", failureCategory: .validation) }
     private func defaultSearchRoots() -> [URL] { let manager = FileManager.default; return [.desktopDirectory, .documentDirectory, .downloadsDirectory, .picturesDirectory, .moviesDirectory, .musicDirectory].compactMap { manager.urls(for: $0, in: .userDomainMask).first } }
@@ -212,6 +263,7 @@ private struct WorkflowArguments: Decodable { let name: String; let triggers: St
 private struct PlaylistArguments: Decodable { let reference: String }
 private struct ScreenQuestionArguments: Decodable { let question: String }
 private struct ScreenClickArguments: Decodable { let target: String }
+private struct ComposeEmailArguments: Decodable { let app: String?; let to: String; let subject: String; let body: String }
 
 public final class UnavailableScreenAnalyzer: ScreenAnalyzer {
     public init() {}

@@ -47,6 +47,7 @@ final class KeyboardWtfCoreTests: XCTestCase {
         XCTAssertTrue(names.contains(.playSpotifyPlaylist))
         XCTAssertTrue(names.contains(.playMedia))
         XCTAssertTrue(names.contains(.clickScreen))
+        XCTAssertTrue(names.contains(.composeEmail))
     }
 
     func testScreenClickResolverParsesNormalizedCoordinates() throws {

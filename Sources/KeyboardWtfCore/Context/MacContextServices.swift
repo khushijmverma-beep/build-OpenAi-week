@@ -87,7 +87,25 @@ public final class TextDeliveryService {
     public func deliver(_ text: String, mode: DeliveryMode) async -> ActionReceipt {
         if mode == .copyToClipboard { clipboard.writeString(text); return ActionReceipt(toolName: .copyText, requestedTarget: "clipboard", success: true, verified: true, summary: "Copied to clipboard.") }
         if mode == .askEachTime { clipboard.writeString(text); return ActionReceipt(toolName: .copyText, requestedTarget: "clipboard", success: true, verified: true, summary: "Ready to paste from the clipboard.") }
+        if mode == .typeIntoFocusedApp { return await typeIntoFocusedApp(text) }
         return await selectedText.replaceSelection(with: text)
+    }
+
+    private func typeIntoFocusedApp(_ text: String) async -> ActionReceipt {
+        let started = Date()
+        guard AXIsProcessTrusted() else {
+            return ActionReceipt(toolName: .typeText, requestedTarget: "focused app", success: false, verified: false, summary: "Accessibility permission is required to type into another app.", startedAt: started, endedAt: Date(), failureCategory: .permission, permissionBlocked: true)
+        }
+        do {
+            return try await clipboard.withPreservedClipboard {
+                clipboard.writeString(text)
+                postCommandKey("v")
+                try await Task.sleep(nanoseconds: 180_000_000)
+                return ActionReceipt(toolName: .typeText, requestedTarget: "focused app", success: true, verified: false, summary: "Typed text into the focused app.", startedAt: started, endedAt: Date())
+            }
+        } catch {
+            return ActionReceipt(toolName: .typeText, requestedTarget: "focused app", success: false, verified: false, summary: "Copied text to the clipboard; typing could not be completed.", startedAt: started, endedAt: Date(), failureCategory: .permission, permissionBlocked: true)
+        }
     }
 }
 
