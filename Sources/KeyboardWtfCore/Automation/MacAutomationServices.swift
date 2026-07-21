@@ -132,16 +132,29 @@ public final class MacSpotifyPlaybackController: SpotifyPlaybackController {
     }
 }
 
-/// Sends the standard macOS media Play/Pause key to the current media player.
-/// It does not inspect or capture the screen and only runs after Jarvis receives
-/// an explicit play/pause request.
+/// Controls Spotify directly when it is the active media app, then falls back
+/// to the standard macOS media Play/Pause key for other players.
 public final class MacMediaPlaybackController: MediaPlaybackController {
-    public init() {}
+    private let workspace: NSWorkspace
+    public init(workspace: NSWorkspace = .shared) { self.workspace = workspace }
 
     public func play() async -> ActionReceipt {
         let started = Date()
+        if workspace.runningApplications.contains(where: { $0.bundleIdentifier == "com.spotify.client" }) {
+            var error: NSDictionary?
+            let script = """
+            tell application id "com.spotify.client"
+                activate
+                play
+            end tell
+            """
+            if NSAppleScript(source: script)?.executeAndReturnError(&error) != nil {
+                return ActionReceipt(toolName: .playMedia, requestedTarget: "Spotify", resolvedTarget: "com.spotify.client", success: true, verified: true, summary: "Pressed Play in Spotify.", startedAt: started, endedAt: Date())
+            }
+        }
+
         guard AXIsProcessTrusted() else {
-            return ActionReceipt(toolName: .playMedia, requestedTarget: "active media player", success: false, verified: false, summary: "Accessibility permission is required to press the system Play/Pause key.", startedAt: started, endedAt: Date(), failureCategory: .permission, permissionBlocked: true)
+            return ActionReceipt(toolName: .playMedia, requestedTarget: "active media player", success: false, verified: false, summary: "Spotify could not be controlled directly. Accessibility permission is required for the system Play/Pause fallback.", startedAt: started, endedAt: Date(), failureCategory: .permission, permissionBlocked: true)
         }
         let keyCode: Int32 = 16 // NX_KEYTYPE_PLAY
         let data1 = Int((keyCode << 16) | (0xA << 8))
@@ -312,7 +325,7 @@ public final class DefaultToolRegistry: ToolRegistry {
             ToolDefinition(name: .closeApp, description: "Ask a running macOS application to quit normally. Never force-quit; macOS can request confirmation for unsaved work.", parameters: [ToolParameter(name: "name", type: .string, description: "Application name")]),
             ToolDefinition(name: .openURL, description: "Open a verified http or https URL.", parameters: [ToolParameter(name: "url", type: .string, description: "URL")]),
             ToolDefinition(name: .webSearch, description: "Search the web in the default browser.", parameters: [ToolParameter(name: "query", type: .string, description: "Search query")]),
-            ToolDefinition(name: .playMedia, description: "Press the standard macOS Play/Pause key for the active media player after the user explicitly asks to play or pause media.", parameters: []),
+            ToolDefinition(name: .playMedia, description: "When Spotify is running, control Spotify directly to start playback; otherwise use the standard macOS Play/Pause key for the active media player. Use only after the user explicitly asks to play media.", parameters: []),
             ToolDefinition(name: .playSpotifyPlaylist, description: "Play an exact Spotify playlist using a spotify:playlist URI or an open.spotify.com/playlist link. If the user only gives a playlist name, ask them for its Spotify share link rather than guessing.", parameters: [ToolParameter(name: "reference", type: .string, description: "Spotify playlist URI or share URL")]),
             ToolDefinition(name: .typeText, description: "Insert text into the focused application without submitting it.", parameters: [ToolParameter(name: "text", type: .string, description: "Text to insert")]),
             ToolDefinition(name: .copyText, description: "Copy text to the clipboard.", parameters: [ToolParameter(name: "text", type: .string, description: "Text to copy")]),
