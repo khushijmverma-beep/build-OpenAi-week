@@ -31,10 +31,19 @@ public final class OpenAIRealtimeWebSocketClient: OpenAIRealtimeClient {
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         request.setValue(installationHash, forHTTPHeaderField: "OpenAI-Safety-Identifier")
         let task = session.webSocketTask(with: request)
-        socket = task; task.resume()
-        try await send(sessionUpdate(configuration))
-        continuation.yield(.connected)
-        receiver = Task { [weak self] in await self?.receiveLoop() }
+        socket = task
+        task.resume()
+        // Start receiving before configuration is sent so that a quick server-side
+        // rejection is observed instead of leaving the overlay in a listening state.
+        receiver = Task { [weak self] in await self?.receiveLoop(socket: task) }
+        do {
+            try await send(sessionUpdate(configuration))
+            logger.info("realtime.connected", metadata: ["model": configuration.model])
+            continuation.yield(.connected)
+        } catch {
+            await disconnect()
+            throw error
+        }
     }
 
     public func appendAudio(_ data: Data) async throws {
@@ -63,10 +72,10 @@ public final class OpenAIRealtimeWebSocketClient: OpenAIRealtimeClient {
     public func disconnect() async {
         receiver?.cancel(); receiver = nil
         socket?.cancel(with: .normalClosure, reason: nil); socket = nil; lastOutputItemID = nil
+        logger.info("realtime.disconnected", metadata: [:])
     }
 
-    private func receiveLoop() async {
-        guard let socket else { return }
+    private func receiveLoop(socket: URLSessionWebSocketTask) async {
         do {
             while !Task.isCancelled {
                 let message = try await socket.receive()
@@ -77,7 +86,10 @@ public final class OpenAIRealtimeWebSocketClient: OpenAIRealtimeClient {
                 }
             }
         } catch {
-            if !Task.isCancelled { continuation.yield(.error(classify(error))) }
+            if !Task.isCancelled {
+                logger.error("realtime.receive_failed", metadata: ["error": error.localizedDescription])
+                continuation.yield(.error(classify(error)))
+            }
         }
     }
 
@@ -86,6 +98,7 @@ public final class OpenAIRealtimeWebSocketClient: OpenAIRealtimeClient {
         switch type {
         case "session.created", "session.updated": continuation.yield(.sessionUpdated)
         case "input_audio_buffer.speech_started": continuation.yield(.inputSpeechStarted)
+        case "input_audio_buffer.speech_stopped": continuation.yield(.inputSpeechStopped)
         case "conversation.item.created":
             if let item = object["item"] as? [String: Any], item["role"] as? String == "assistant" { lastOutputItemID = item["id"] as? String }
         case "response.output_audio.delta":
@@ -126,7 +139,20 @@ public final class OpenAIRealtimeWebSocketClient: OpenAIRealtimeClient {
                 "type": "realtime", "model": configuration.model, "output_modalities": ["audio"],
                 "instructions": configuration.instructions + "\nSafety identifier: \(installationHash).",
                 "audio": [
-                    "input": ["format": ["type": "audio/pcm", "rate": 24_000], "turn_detection": ["type": "semantic_vad"]],
+                    // Server VAD gives a deliberate turn end after a short silence.
+                    // It is more reliable for a hands-free desktop assistant than
+                    // semantic VAD, which can wait too long after brief requests.
+                    "input": [
+                        "format": ["type": "audio/pcm", "rate": 24_000],
+                        "turn_detection": [
+                            "type": "server_vad",
+                            "threshold": 0.45,
+                            "prefix_padding_ms": 300,
+                            "silence_duration_ms": 650,
+                            "create_response": true,
+                            "interrupt_response": true
+                        ]
+                    ],
                     "output": ["format": ["type": "audio/pcm"], "voice": configuration.voice]
                 ],
                 "tools": tools, "tool_choice": "auto"

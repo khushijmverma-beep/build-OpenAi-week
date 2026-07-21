@@ -45,5 +45,6 @@ public enum RealtimeEvent: Equatable, Sendable {
     case toolCall(ToolCall)
     case responseDone
     case inputSpeechStarted
+    case inputSpeechStopped
     case error(AppError)
 }

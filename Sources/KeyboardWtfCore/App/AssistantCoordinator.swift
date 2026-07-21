@@ -28,7 +28,6 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
 
     public init(state: ObservableAssistantStateStore, audioCapture: AudioCaptureService, audioPlayback: AudioPlaybackService, recognizer: LocalSpeechRecognizer, responses: OpenAIResponsesClient, realtime: OpenAIRealtimeClient, delivery: TextDeliveryService, selectedText: SelectedTextProvider, tools: ToolRegistry, executor: ActionExecutor, policy: PermissionPolicy, receiptStore: ActionReceiptStore, settings: SettingsStore) {
         self.state = state; self.audioCapture = audioCapture; self.audioPlayback = audioPlayback; self.recognizer = recognizer; self.responses = responses; self.realtime = realtime; self.delivery = delivery; self.selectedText = selectedText; self.tools = tools; self.executor = executor; self.policy = policy; self.receiptStore = receiptStore; self.settings = settings
-        audioCapture.onAudioChunk = { [weak self] data, level in Task { await self?.ingestAudio(data, level: level) } }
     }
 
     public func start(mode: AssistantMode) async {
@@ -54,9 +53,12 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
     }
 
     private func beginLocalCapture(_ mode: AssistantMode) async {
+        let id = operationID
+        configureAudioCallback(for: mode, operationID: id)
         state.transition(to: AssistantSnapshot(phase: .listening, mode: mode, title: mode.displayName, detail: "Speak naturally. Press the same shortcut to finish.", cancelHint: "⌃⌥X cancels"))
         do {
             try await recognizer.startStreaming()
+            guard operationID == id, activeMode == mode else { return }
             try audioCapture.start()
             let stream = recognizer.partialTranscript
             localSpeechDetected = false
@@ -105,40 +107,60 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
     }
 
     private func beginJarvis() async {
+        let id = operationID
         state.transition(to: AssistantSnapshot(phase: .connecting, mode: .jarvis, title: settings.settings.assistantName, detail: "Starting live conversation…", cancelHint: "⌃⌥X cancels"))
         do {
             let selectionContext = invocationSelection?.text.isEmpty == false ? " The user explicitly selected this context before invoking you: \(invocationSelection!.text). Use it only when relevant to their request; do not retain it." : ""
             let instructions = "You are \(settings.settings.assistantName), a concise macOS assistant. Use typed tools only. Never claim an action succeeded without its returned receipt. Ask when ambiguous. Require a fresh confirmation for restart and shutdown.\(selectionContext)"
             try await realtime.connect(configuration: RealtimeConfiguration(model: settings.settings.realtimeModel, assistantName: settings.settings.assistantName, instructions: instructions, tools: tools.schemas()))
+            guard operationID == id, activeMode == .jarvis else { return }
+            configureAudioCallback(for: .jarvis, operationID: id)
             try audioCapture.start()
+            guard operationID == id, activeMode == .jarvis else { return }
             let events = realtime.events
-            realtimeTask = Task { [weak self] in
-                for await event in events { await self?.handle(event) }
+            realtimeTask = Task { [weak self, id] in
+                for await event in events { await self?.handle(event, operationID: id) }
             }
             state.transition(to: AssistantSnapshot(phase: .listening, mode: .jarvis, title: settings.settings.assistantName, detail: "Talk naturally.", cancelHint: "⌃⌥X cancels"))
         } catch {
-            activeMode = nil; state.transition(to: AssistantSnapshot(phase: .error, mode: .jarvis, title: "Could not connect", detail: error.localizedDescription))
+            await failJarvis(error, operationID: id, title: "Could not connect")
         }
     }
 
-    private func ingestAudio(_ data: Data, level: Float) async {
+    private func configureAudioCallback(for mode: AssistantMode, operationID: UUID) {
+        audioCapture.onAudioChunk = { [weak self] data, level in
+            Task { @MainActor [weak self] in
+                await self?.ingestAudio(data, level: level, mode: mode, operationID: operationID)
+            }
+        }
+    }
+
+    private func ingestAudio(_ data: Data, level: Float, mode: AssistantMode, operationID: UUID) async {
+        guard self.operationID == operationID, activeMode == mode else { return }
         state.updateMicrophoneLevel(level)
-        guard let activeMode else { return }
-        if activeMode == .jarvis { try? await realtime.appendAudio(data) } else { await recognizer.append(audio: data) }
-        if activeMode != .jarvis {
+        if mode == .jarvis {
+            do {
+                try await realtime.appendAudio(data)
+            } catch {
+                await failJarvis(error, operationID: operationID, title: "Microphone stream stopped")
+            }
+        } else {
+            await recognizer.append(audio: data)
             await pauseDetector.ingest(level: level)
             if level >= 0.035 { localSpeechDetected = true }
         }
     }
 
-    private func handle(_ event: RealtimeEvent) async {
+    private func handle(_ event: RealtimeEvent, operationID: UUID) async {
+        guard self.operationID == operationID, activeMode == .jarvis else { return }
         switch event {
         case let .outputAudio(data): audioPlayback.enqueuePCM16(data); state.transition(to: AssistantSnapshot(phase: .speaking, mode: .jarvis, title: settings.settings.assistantName, detail: "Speaking…", cancelHint: "⌃⌥X cancels"))
         case .inputSpeechStarted: audioPlayback.stop(); state.transition(to: AssistantSnapshot(phase: .listening, mode: .jarvis, title: settings.settings.assistantName, detail: "Listening…", cancelHint: "⌃⌥X cancels"))
+        case .inputSpeechStopped: state.transition(to: AssistantSnapshot(phase: .thinking, mode: .jarvis, title: settings.settings.assistantName, detail: "Thinking…", cancelHint: "⌃⌥X cancels"))
         case let .inputTranscriptDelta(text): state.updatePartialTranscript(text); if text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "confirm" { await confirmPendingAction() }
         case let .outputTranscriptDelta(text): state.updatePartialTranscript(text)
         case let .toolCall(call): await execute(call)
-        case let .error(error): state.transition(to: AssistantSnapshot(phase: .error, mode: .jarvis, title: "Jarvis", detail: error.localizedDescription))
+        case let .error(error): await failJarvis(error, operationID: operationID, title: "Jarvis connection stopped")
         default: break
         }
     }
@@ -153,8 +175,24 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
     }
 
     private func cancel(silent: Bool) async {
-        operationID = UUID(); audioCapture.stop(); audioPlayback.stop(); partialTask?.cancel(); localCompletionTask?.cancel(); realtimeTask?.cancel(); partialTask = nil; localCompletionTask = nil; realtimeTask = nil; localSpeechDetected = false; await recognizer.cancel(); await realtime.interrupt(); await realtime.disconnect(); activeMode = nil; pendingTool = nil; confirmation = nil
+        operationID = UUID(); audioCapture.onAudioChunk = nil; audioCapture.stop(); audioPlayback.stop(); partialTask?.cancel(); localCompletionTask?.cancel(); realtimeTask?.cancel(); partialTask = nil; localCompletionTask = nil; realtimeTask = nil; localSpeechDetected = false; await recognizer.cancel(); await realtime.interrupt(); await realtime.disconnect(); activeMode = nil; pendingTool = nil; confirmation = nil
         if !silent { state.transition(to: AssistantSnapshot(phase: .cancelled, title: "Cancelled", detail: "Nothing else will be typed, spoken, or executed.")) }
+    }
+
+    private func failJarvis(_ error: Error, operationID: UUID, title: String) async {
+        guard self.operationID == operationID else { return }
+        self.operationID = UUID()
+        audioCapture.onAudioChunk = nil
+        audioCapture.stop()
+        audioPlayback.stop()
+        realtimeTask?.cancel()
+        realtimeTask = nil
+        await realtime.interrupt()
+        await realtime.disconnect()
+        activeMode = nil
+        pendingTool = nil
+        confirmation = nil
+        state.transition(to: AssistantSnapshot(phase: .error, mode: .jarvis, title: title, detail: error.localizedDescription))
     }
 
     private func receiptJSON(_ receipt: ActionReceipt) -> String { String(data: (try? JSONEncoder().encode(receipt)) ?? Data("{}".utf8), encoding: .utf8) ?? "{}" }
