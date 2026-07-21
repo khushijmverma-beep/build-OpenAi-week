@@ -52,7 +52,7 @@ public final class MacActionExecutor: ActionExecutor {
             }
         case .openURL:
             guard let args = decode(URLArguments.self, call) else { return invalid(call) }
-            guard let url = URL(string: args.url), ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return ActionReceipt(toolName: call.name, requestedTarget: args.url, success: false, verified: false, summary: "Only secure web URLs can be opened.", failureCategory: .validation) }
+            guard let url = Self.normalizedHTTPURL(from: args.url) else { return ActionReceipt(toolName: call.name, requestedTarget: args.url, success: false, verified: false, summary: "Only secure web URLs can be opened.", failureCategory: .validation) }
             let success = NSWorkspace.shared.open(url)
             return ActionReceipt(toolName: call.name, requestedTarget: args.url, resolvedTarget: url.absoluteString, success: success, verified: success, summary: success ? "Opened URL." : "Could not open that URL.", failureCategory: success ? .none : .unknown)
         case .webSearch:
@@ -289,6 +289,13 @@ public final class MacActionExecutor: ActionExecutor {
     }
 
     private func decode<T: Decodable>(_ type: T.Type, _ call: ToolCall) -> T? { try? decoder.decode(type, from: Data(call.argumentsJSON.utf8)) }
+    public static func normalizedHTTPURL(from rawValue: String) -> URL? {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let candidate = trimmed.range(of: "^[a-z][a-z0-9+.-]*://", options: [.regularExpression, .caseInsensitive]) == nil ? "https://\(trimmed)" : trimmed
+        guard let url = URL(string: candidate), ["http", "https"].contains(url.scheme?.lowercased() ?? ""), url.host != nil else { return nil }
+        return url
+    }
     private func invalid(_ call: ToolCall) -> ActionReceipt { ActionReceipt(toolName: call.name, requestedTarget: "", success: false, verified: false, summary: "The requested action had invalid arguments.", failureCategory: .validation) }
     private func defaultSearchRoots() -> [URL] { let manager = FileManager.default; return [.desktopDirectory, .documentDirectory, .downloadsDirectory, .picturesDirectory, .moviesDirectory, .musicDirectory].compactMap { manager.urls(for: $0, in: .userDomainMask).first } }
     private func isApprovedPath(_ url: URL) -> Bool { defaultSearchRoots().contains { url.standardizedFileURL.path.hasPrefix($0.standardizedFileURL.path + "/") || url.standardizedFileURL == $0.standardizedFileURL } }

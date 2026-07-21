@@ -40,6 +40,13 @@ final class KeyboardWtfCoreTests: XCTestCase {
         XCTAssertNil(MacSpotifyPlaybackController.playlistURI(from: "spotify:playlist:unsafe\" script"))
     }
 
+    func testOpenURLNormalizesBareDomainsWithoutAllowingUnsafeSchemes() {
+        XCTAssertEqual(MacActionExecutor.normalizedHTTPURL(from: "google.com")?.absoluteString, "https://google.com")
+        XCTAssertEqual(MacActionExecutor.normalizedHTTPURL(from: "  https://www.google.com/path ")?.absoluteString, "https://www.google.com/path")
+        XCTAssertNil(MacActionExecutor.normalizedHTTPURL(from: "file:///etc/passwd"))
+        XCTAssertNil(MacActionExecutor.normalizedHTTPURL(from: "not a URL"))
+    }
+
     func testToolRegistryIncludesRequestedMacControls() {
         let names = Set(DefaultToolRegistry().schemas().map(\.name))
         XCTAssertTrue(names.contains(.closeApp))

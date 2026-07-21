@@ -195,7 +195,7 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
 
     private func jarvisConfiguration() -> RealtimeConfiguration {
         let selectionContext = invocationSelection?.text.isEmpty == false ? " The user explicitly selected this context before invoking you: \(invocationSelection!.text). Use it only when relevant to their request; do not retain it." : ""
-        let instructions = "You are \(settings.settings.assistantName), a concise macOS task assistant. Use typed tools and act before speaking. For a task request, do not narrate steps or give a long explanation; after a successful task say exactly, or nearly exactly, ‘Alright, done.’ For a failure, give one short actionable sentence. When asked to create an email without naming an app, use compose_email with Gmail; it opens https://mail.google.com, scans the visible browser screen after each transition, fills To, Subject, and body, and leaves the draft unsent. Never click Send unless the user explicitly asks to send and confirms. When asked to type text, use type_text and do not submit the form. Close apps only with close_app; it performs a normal quit and never force-quits. When the user explicitly says to close all browser tabs, use close_all_tabs; it only closes tabs in currently running Safari and Google Chrome windows and never sends or submits anything. For an explicit task that requires a visible UI, use inspect_screen or click_screen as needed after each screen transition; do not capture screens in the background or for unrelated conversation. Screen Recording and Accessibility are required for screen analysis/clicking. Never click delete, purchase, submit, send, publish, confirm, or another consequential control without first asking for a fresh confirmation. If the user refers to text currently selected, call get_selected_text before answering so the current selection is read at that moment. When selected text is present and the user asks to translate, summarize, rewrite, or make it professional, produce the transformation and use copy_text so the result is on the clipboard; never replace their selection unless explicitly asked. When the user explicitly asks to play or pause active media, use play_media; for an exact Spotify playlist, use play_spotify_playlist only with a Spotify playlist URI or share URL. Ask when ambiguous. Require a fresh confirmation for restart, shutdown, purchases, deletion, submission, sending, or other irreversible actions.\(selectionContext)"
+        let instructions = "You are \(settings.settings.assistantName), a concise macOS task assistant. Use typed tools and act before speaking. For a task request, do not narrate steps or give a long explanation; after a successful task say exactly, or nearly exactly, ‘Alright, done.’ For a failure, give one short actionable sentence. For a simple request to open or navigate to a website, call open_url exactly once, use https for a bare domain such as google.com, and do not inspect the screen or wait for page contents unless the user asks you to interact with that page. When asked to create an email without naming an app, use compose_email with Gmail; it opens https://mail.google.com, scans the visible browser screen after each transition, fills To, Subject, and body, and leaves the draft unsent. Never click Send unless the user explicitly asks to send and confirms. When asked to type text, use type_text and do not submit the form. Close apps only with close_app; it performs a normal quit and never force-quits. When the user explicitly says to close all browser tabs, use close_all_tabs; it only closes tabs in currently running Safari and Google Chrome windows and never sends or submits anything. For an explicit task that requires a visible UI, use inspect_screen or click_screen as needed after each screen transition; do not capture screens in the background or for unrelated conversation. Screen Recording and Accessibility are required for screen analysis/clicking. Never click delete, purchase, submit, send, publish, confirm, or another consequential control without first asking for a fresh confirmation. If the user refers to text currently selected, call get_selected_text before answering so the current selection is read at that moment. When selected text is present and the user asks to translate, summarize, rewrite, or make it professional, produce the transformation and use copy_text so the result is on the clipboard; never replace their selection unless explicitly asked. When the user explicitly asks to play or pause active media, use play_media; for an exact Spotify playlist, use play_spotify_playlist only with a Spotify playlist URI or share URL. Ask when ambiguous. Require a fresh confirmation for restart, shutdown, purchases, deletion, submission, sending, or other irreversible actions.\(selectionContext)"
         return RealtimeConfiguration(model: settings.settings.realtimeModel, assistantName: settings.settings.assistantName, instructions: instructions, tools: tools.schemas())
     }
 
@@ -379,7 +379,7 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
                 continue
             }
             state.transition(to: AssistantSnapshot(phase: .executing, mode: .jarvis, title: settings.settings.assistantName, detail: "Working…", cancelHint: "⌃⌥X cancels"))
-            let receipt = await executor.execute(call, confirmed: false)
+            let receipt = await executeToolWithTimeout(call)
             await receiptStore.append(receipt)
             outputs.append((call.id, receiptJSON(receipt)))
         }
@@ -388,20 +388,55 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
     }
 
     private func continueAfterToolOutputs(_ outputs: [(String, String)], detail: String) async {
-        do {
-            // Write every function result before asking Realtime to continue.
-            // Sending response.create between individual outputs causes the
-            // API's “active response in progress” error and used to end Jarvis.
-            for (callID, output) in outputs {
-                try await realtime.sendToolOutput(callID: callID, output: output)
-            }
-            try await realtime.requestResponse()
+        let submitted = await submitToolOutputsWithTimeout(outputs)
+        if submitted {
             state.transition(to: AssistantSnapshot(phase: .listening, mode: .jarvis, title: settings.settings.assistantName, detail: detail, cancelHint: "⌃⌥X cancels"))
-        } catch {
+        } else {
             // Keep the microphone and WebSocket alive.  A later Realtime
             // response-done event or the user's next turn can recover without
             // forcing them to reopen Jarvis.
             state.transition(to: AssistantSnapshot(phase: .listening, mode: .jarvis, title: settings.settings.assistantName, detail: "Action finished. Jarvis is still listening.", cancelHint: "⌃⌥X cancels"))
+        }
+    }
+
+    private func executeToolWithTimeout(_ call: ToolCall) async -> ActionReceipt {
+        let executor = self.executor
+        return await withTaskGroup(of: ActionReceipt.self) { group in
+            group.addTask { await executor.execute(call, confirmed: false) }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: 15_000_000_000)
+                return ActionReceipt(toolName: call.name, requestedTarget: "", success: false, verified: false, summary: "That action timed out, but Jarvis is still listening.", failureCategory: .transport)
+            }
+            let result = await group.next() ?? ActionReceipt(toolName: call.name, requestedTarget: "", success: false, verified: false, summary: "That action could not finish, but Jarvis is still listening.", failureCategory: .transport)
+            group.cancelAll()
+            return result
+        }
+    }
+
+    private func submitToolOutputsWithTimeout(_ outputs: [(String, String)]) async -> Bool {
+        let realtime = self.realtime
+        return await withTaskGroup(of: Bool.self) { group in
+            group.addTask {
+                do {
+                    // Write every function result before asking Realtime to continue.
+                    // Sending response.create between individual outputs causes the
+                    // API's “active response in progress” error and used to end Jarvis.
+                    for (callID, output) in outputs {
+                        try await realtime.sendToolOutput(callID: callID, output: output)
+                    }
+                    try await realtime.requestResponse()
+                    return true
+                } catch {
+                    return false
+                }
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: 8_000_000_000)
+                return false
+            }
+            let result = await group.next() ?? false
+            group.cancelAll()
+            return result
         }
     }
 
