@@ -11,6 +11,7 @@ public enum ToolName: String, Codable, CaseIterable, Sendable {
     case minimiseWindow = "minimise_window"
     case maximiseWindow = "maximise_window"
     case closeWindow = "close_window"
+    case closeAllTabs = "close_all_tabs"
     case openFile = "open_file"
     case openFolder = "open_folder"
     case searchFiles = "search_files"

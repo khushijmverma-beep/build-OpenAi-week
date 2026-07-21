@@ -48,6 +48,7 @@ final class KeyboardWtfCoreTests: XCTestCase {
         XCTAssertTrue(names.contains(.playMedia))
         XCTAssertTrue(names.contains(.clickScreen))
         XCTAssertTrue(names.contains(.composeEmail))
+        XCTAssertTrue(names.contains(.closeAllTabs))
     }
 
     func testHotkeyNormalizationRepairsMalformedValues() {
@@ -163,6 +164,16 @@ final class KeyboardWtfCoreTests: XCTestCase {
         XCTAssertTrue(toolOutputWasSent)
         XCTAssertTrue(completed)
         await client.interrupt()
+    }
+
+    @MainActor
+    func testLiveJarvisVoiceConnectionWhenExplicitlyEnabled() async throws {
+        guard ProcessInfo.processInfo.environment["RUN_LIVE_OPENAI_TESTS"] == "1" else {
+            throw XCTSkip("Live API checks are opt-in.")
+        }
+        let environment = try AppEnvironment()
+        let bytes = try await environment.testJarvisVoiceConnection()
+        XCTAssertGreaterThan(bytes, 0)
     }
 
     @MainActor

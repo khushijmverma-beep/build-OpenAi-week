@@ -26,7 +26,9 @@ public final class GlobalHotkeyService {
         guard InstallEventHandler(GetApplicationEventTarget(), { _, event, userData in
             guard let event, let userData else { return noErr }
             var identifier = EventHotKeyID(); guard GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID), nil, MemoryLayout<EventHotKeyID>.size, nil, &identifier) == noErr, let action = Action(rawValue: identifier.id) else { return OSStatus(eventNotHandledErr) }
-            Unmanaged<GlobalHotkeyService>.fromOpaque(userData).takeUnretainedValue().callback(action)
+            let service = Unmanaged<GlobalHotkeyService>.fromOpaque(userData).takeUnretainedValue()
+            service.logger.info("hotkey.pressed", metadata: ["action": "\(action)"])
+            service.callback(action)
             return noErr
         }, 1, &eventType, pointer, &handler) == noErr else { throw AppError.unsupported("macOS could not install the global hotkey listener.") }
         for binding in planned { try register(binding.action, keyCode: binding.keyCode) }

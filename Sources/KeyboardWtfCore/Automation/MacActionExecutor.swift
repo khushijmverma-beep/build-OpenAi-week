@@ -93,6 +93,8 @@ public final class MacActionExecutor: ActionExecutor {
         case .closeWindow:
             guard let args = decode(TitleArguments.self, call) else { return invalid(call) }
             return await windows.closeWindow(matching: args.title)
+        case .closeAllTabs:
+            return closeAllBrowserTabs()
         case .takeScreenshot:
             do {
                 let url = try await screen.screenshot()
@@ -259,6 +261,31 @@ public final class MacActionExecutor: ActionExecutor {
 
     private func composeFailure(_ target: String, _ summary: String, started: Date, category: FailureCategory, permissionBlocked: Bool = false) -> ActionReceipt {
         ActionReceipt(toolName: .composeEmail, requestedTarget: target, success: false, verified: false, summary: summary, startedAt: started, endedAt: Date(), failureCategory: category, permissionBlocked: permissionBlocked)
+    }
+
+    private func closeAllBrowserTabs() -> ActionReceipt {
+        let started = Date()
+        let browsers: [(name: String, bundleID: String, script: String)] = [
+            ("Safari", "com.apple.Safari", "tell application id \"com.apple.Safari\" to close every tab of every window"),
+            ("Google Chrome", "com.google.Chrome", "tell application id \"com.google.Chrome\" to close every tab of every window")
+        ]
+        let running = browsers.filter { browser in
+            NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier == browser.bundleID }
+        }
+        guard !running.isEmpty else {
+            return ActionReceipt(toolName: .closeAllTabs, requestedTarget: "running browser tabs", success: true, verified: true, summary: "No supported browser is running.", startedAt: started, endedAt: Date())
+        }
+
+        var closed = [String]()
+        for browser in running {
+            var error: NSDictionary?
+            guard NSAppleScript(source: browser.script)?.executeAndReturnError(&error) != nil else {
+                let hasPermissionError = (error?[NSAppleScript.errorNumber] as? Int).map { $0 == -1743 || $0 == -10004 } ?? false
+                return ActionReceipt(toolName: .closeAllTabs, requestedTarget: "running browser tabs", resolvedTarget: closed.joined(separator: ", "), success: false, verified: false, summary: hasPermissionError ? "macOS Automation permission is required to close browser tabs." : "Could not close tabs in \(browser.name).", startedAt: started, endedAt: Date(), failureCategory: hasPermissionError ? .permission : .unknown, permissionBlocked: hasPermissionError)
+            }
+            closed.append(browser.name)
+        }
+        return ActionReceipt(toolName: .closeAllTabs, requestedTarget: "running browser tabs", resolvedTarget: closed.joined(separator: ", "), success: true, verified: true, summary: "Closed all tabs in \(closed.joined(separator: " and ")).", startedAt: started, endedAt: Date())
     }
 
     private func decode<T: Decodable>(_ type: T.Type, _ call: ToolCall) -> T? { try? decoder.decode(type, from: Data(call.argumentsJSON.utf8)) }

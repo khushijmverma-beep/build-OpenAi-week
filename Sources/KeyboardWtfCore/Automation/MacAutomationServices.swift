@@ -336,6 +336,7 @@ public final class DefaultToolRegistry: ToolRegistry {
             ToolDefinition(name: .minimiseWindow, description: "Minimise an accessible window by title.", parameters: [ToolParameter(name: "title", type: .string, description: "Window title")]),
             ToolDefinition(name: .maximiseWindow, description: "Maximise or zoom an accessible window by title where macOS supports it.", parameters: [ToolParameter(name: "title", type: .string, description: "Window title")]),
             ToolDefinition(name: .closeWindow, description: "Close one accessible window by title using its normal close action.", parameters: [ToolParameter(name: "title", type: .string, description: "Window title")]),
+            ToolDefinition(name: .closeAllTabs, description: "Close every tab in currently running Safari and Google Chrome windows after the user explicitly asks. Requires macOS Automation permission for each browser.", parameters: []),
             ToolDefinition(name: .takeScreenshot, description: "Take an explicit screenshot and save it locally. Requires Screen Recording permission.", parameters: []),
             ToolDefinition(name: .takeWebcamPhoto, description: "Take one photo with the Mac camera only after the user explicitly asks.", parameters: []),
             ToolDefinition(name: .inspectScreen, description: "Capture and analyze the visible screen only when the user explicitly asks to analyze, explain, or navigate their screen.", parameters: [ToolParameter(name: "question", type: .string, description: "The user's explicit screen-analysis question")]),
