@@ -126,7 +126,7 @@ public enum AppError: LocalizedError, Equatable, Sendable {
         case .authentication: return "Add a valid OpenAI API key in Settings."
         case let .modelUnavailable(name): return "The model \(name) is unavailable."
         case .rateLimited: return "OpenAI is rate limiting this request. Try again shortly."
-        case .realtimeTransport: return "The live conversation connection was interrupted."
+        case let .realtimeTransport(message): return "The live conversation connection was interrupted. \(message)"
         case .permission: return "A macOS permission is needed for that action."
         case .accessibility: return "Accessibility could not complete that action."
         case .appResolution: return "That application could not be identified safely."

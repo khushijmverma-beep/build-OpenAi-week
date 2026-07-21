@@ -96,7 +96,9 @@ public final class OpenAIRealtimeWebSocketClient: OpenAIRealtimeClient {
     private func handle(_ text: String) {
         guard let object = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any], let type = object["type"] as? String else { continuation.yield(.error(.malformedResponse("Missing Realtime event type"))); return }
         switch type {
-        case "session.created", "session.updated": continuation.yield(.sessionUpdated)
+        case "session.created", "session.updated":
+            logger.info("realtime.session_event", metadata: ["type": type])
+            continuation.yield(.sessionUpdated)
         case "input_audio_buffer.speech_started": continuation.yield(.inputSpeechStarted)
         case "input_audio_buffer.speech_stopped": continuation.yield(.inputSpeechStopped)
         case "conversation.item.created":
@@ -114,7 +116,10 @@ public final class OpenAIRealtimeWebSocketClient: OpenAIRealtimeClient {
         case "response.done": continuation.yield(.responseDone)
         case "error":
             let error = object["error"] as? [String: Any]
-            continuation.yield(.error(.realtimeTransport(error?["message"] as? String ?? "Realtime request failed")))
+            let message = error?["message"] as? String ?? "Realtime request failed"
+            let code = error?["code"] as? String ?? "unknown"
+            logger.error("realtime.server_error", metadata: ["code": code, "message": message])
+            continuation.yield(.error(.realtimeTransport(message)))
         default: break
         }
     }
@@ -146,14 +151,17 @@ public final class OpenAIRealtimeWebSocketClient: OpenAIRealtimeClient {
                         "format": ["type": "audio/pcm", "rate": 24_000],
                         "turn_detection": [
                             "type": "server_vad",
-                            "threshold": 0.45,
+                            // Use an exactly representable value. JSONSerialization can
+                            // expand 0.45 to 17 decimal places, which the Realtime API
+                            // rejects during session.update.
+                            "threshold": 0.5,
                             "prefix_padding_ms": 300,
                             "silence_duration_ms": 650,
                             "create_response": true,
                             "interrupt_response": true
                         ]
                     ],
-                    "output": ["format": ["type": "audio/pcm"], "voice": configuration.voice]
+                    "output": ["format": ["type": "audio/pcm", "rate": 24_000], "voice": configuration.voice]
                 ],
                 "tools": tools, "tool_choice": "auto"
             ]
