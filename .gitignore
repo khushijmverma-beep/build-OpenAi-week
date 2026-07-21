@@ -20,3 +20,4 @@ Diagnostics/
 *.app
 *.dmg
 *.zip
+!website/keyboard.wtf-macos.zip

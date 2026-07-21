@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ORISIS for macOS</title>
+  <meta name="description" content="A voice-first macOS assistant for dictation, smart writing, and natural Jarvis conversations.">
+  <style>
+    :root { color-scheme: dark; --bg:#080b12; --panel:#121826; --line:#26324b; --text:#f4f7ff; --muted:#a9b4c9; --accent:#8d5cff; --accent2:#26d5e8; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; font:16px/1.55 -apple-system,BlinkMacSystemFont,"SF Pro Display",sans-serif; color:var(--text); background:radial-gradient(circle at 25% 5%,#20234a 0,#080b12 48%),var(--bg); }
+    main { width:min(920px,calc(100% - 40px)); margin:0 auto; padding:96px 0 72px; }
+    .eyebrow { color:var(--accent2); letter-spacing:.16em; text-transform:uppercase; font-size:12px; font-weight:700; }
+    h1 { max-width:720px; margin:16px 0; font-size:clamp(44px,8vw,84px); line-height:.98; letter-spacing:-.06em; }
+    .lede { max-width:620px; color:var(--muted); font-size:20px; }
+    .actions { display:flex; gap:12px; flex-wrap:wrap; margin:32px 0 62px; }
+    a.button { display:inline-flex; align-items:center; justify-content:center; min-height:48px; padding:0 22px; border:1px solid var(--line); border-radius:12px; color:var(--text); text-decoration:none; font-weight:700; }
+    a.primary { border-color:transparent; background:linear-gradient(135deg,var(--accent),#5a77ff); box-shadow:0 12px 40px #5f48d955; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px; }
+    .card { padding:22px; border:1px solid var(--line); border-radius:18px; background:#111827cc; backdrop-filter:blur(12px); }
+    .card h2 { margin:0 0 6px; font-size:18px; }
+    .card p { margin:0; color:var(--muted); }
+    footer { margin-top:48px; color:var(--muted); font-size:13px; }
+    code { color:#d7ccff; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="eyebrow">ORISIS · keyboard.wtf · macOS</div>
+    <h1>Talk to your Mac like a person.</h1>
+    <p class="lede">A native menu-bar assistant with local dictation, smart writing, and a low-latency Jarvis conversation mode. Your OpenAI key stays in the macOS Keychain.</p>
+    <div class="actions">
+      <a class="button primary" href="/keyboard.wtf-macos.zip" download>Download for Apple silicon</a>
+      <a class="button" href="https://github.com/khushijmverma-beep/build-OpenAi-week">View source</a>
+    </div>
+    <section class="grid" aria-label="Features">
+      <article class="card"><h2>Dictation</h2><p>Speak naturally and insert literal text into the focused app.</p></article>
+      <article class="card"><h2>Smart Writing</h2><p>Turn rough speech into ready-to-send writing through OpenAI Responses.</p></article>
+      <article class="card"><h2>Jarvis</h2><p>Use a Realtime voice conversation with typed, receipt-backed Mac tools.</p></article>
+    </section>
+    <footer>Requires macOS 14 or later on Apple silicon. After opening, add your own OpenAI API key in Settings and approve microphone and Accessibility access when requested. This local-development build is not notarized.</footer>
+  </main>
+</body>
+</html>

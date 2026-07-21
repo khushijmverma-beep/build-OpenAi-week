@@ -10,6 +10,8 @@ public final class AppEnvironment {
     public let permissionCenter: PermissionCenter
     public let launchAtLogin: LaunchAtLoginManager
     public let receiptStore: ActionReceiptStore
+    public let memoryStore: MemoryStore
+    public let workflowStore: WorkflowStore
     public var presentSettings: (() -> Void)?
     public lazy var hotkeys: GlobalHotkeyService = GlobalHotkeyService { [weak self] action in
         Task { @MainActor in
@@ -34,8 +36,10 @@ public final class AppEnvironment {
         let delivery = TextDeliveryService(selectedText: selectedText, clipboard: clipboard)
         let database = try SQLiteStore()
         receiptStore = database
+        memoryStore = database
+        workflowStore = database
         let appResolver = MacAppResolver()
-        let executor = MacActionExecutor(apps: appResolver, delivery: delivery, selectedText: selectedText, clipboard: clipboard, system: MacSystemActionService(), files: BoundedFileSearchService(), windows: MacWindowController(), screen: MacScreenCaptureService(), memory: database, workflows: database)
+        let executor = MacActionExecutor(apps: appResolver, delivery: delivery, selectedText: selectedText, clipboard: clipboard, system: MacSystemActionService(), files: BoundedFileSearchService(), windows: MacWindowController(), screen: MacScreenCaptureService(), memory: database, workflows: database, screenAnalyzer: OpenAIScreenAnalyzer(credentials: credentials))
         permissionCenter = PermissionCenter()
         launchAtLogin = LaunchAtLoginManager()
         coordinator = AssistantCoordinator(

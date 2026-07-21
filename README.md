@@ -10,10 +10,9 @@ The app is designed for macOS 14+, Swift 6, SwiftUI, AppKit, AVFoundation, Acces
 
 ## Quick start
 
-1. Install Xcode 16 and select it with `xcode-select`.
-2. Open this folder in Xcode as a Swift package, or generate an app project with `brew install xcodegen && bash Scripts/generate-project.sh`.
-3. Run `keyboard.wtf`.
-4. Open Settings, add an OpenAI API key, then grant microphone and Accessibility permissions as needed.
+1. Use macOS 14 or later on Apple silicon with Xcode 16 and select it with `xcode-select`.
+2. From this folder run `./Scripts/install-app.sh` to build, sign, install, and launch the menu-bar app. If no Apple Development identity is available, the script uses an ad-hoc signature and macOS permissions may need to be re-approved after rebuilding.
+3. Open Settings from the menu-bar item (or press Control + Option + J), add an OpenAI API key, then grant microphone, Accessibility, and Screen Recording permissions as needed.
 
 The key is saved in the macOS Keychain. `OPENAI_API_KEY` is supported only for development and CI. Copy `.env.example`; never commit `.env`.
 
@@ -25,7 +24,7 @@ The key is saved in the macOS Keychain. `OPENAI_API_KEY` is supported only for d
 | Smart Writing | Control + Option + K |
 | Jarvis | Control + Option + Q |
 | Cancel | Control + Option + X |
-| Settings | Control + Option + , |
+| Settings | Control + Option + J |
 
 Pressing a Dictation or Smart Writing shortcut again finishes its turn. Cancel stops microphone capture, local recognition, OpenAI activity, playback, and pending actions.
 
@@ -43,7 +42,7 @@ Dictation uses a local-only macOS speech recognizer and refuses remote speech re
 
 ## Current verification status
 
-The working Mac available during this build pass is macOS 12.5 with Command Line Tools/Swift 5.7, no Xcode application, no signing identity, and no configured OpenAI key. That environment cannot build an Xcode 16/macOS 14 target or run live hardware/API validation. The repository contains Xcode 16/macOS CI and deterministic tests, but this pass does not claim a successful archive, local hotkey test, microphone test, or live OpenAI test. See [TEST_REPORT.md](TEST_REPORT.md).
+The current Apple-silicon Mac build has passed the deterministic Swift suite (10 tests, 0 failures), a live Responses API smoke test, a live Realtime WebSocket tool round-trip, a production release build, code-signature verification, ZIP extraction/listing, and a packaged `.app` launch. A stable Apple Development identity is not installed on this Mac, so the release artifact is ad-hoc signed and macOS may ask for Keychain or privacy permissions again after rebuilding. Microphone capture, Accessibility actions, Screen Recording, camera capture, Spotify Apple Events, and launch-at-login still require approval and hands-on verification on the Mac.
 
 ## Documentation
 

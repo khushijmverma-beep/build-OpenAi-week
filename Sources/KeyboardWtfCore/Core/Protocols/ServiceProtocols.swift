@@ -86,12 +86,15 @@ public protocol WindowController: AnyObject {
     func listWindows() async -> [String]
     func focusWindow(matching title: String) async -> ActionReceipt
     func minimiseWindow(matching title: String) async -> ActionReceipt
+    func maximiseWindow(matching title: String) async -> ActionReceipt
+    func closeWindow(matching title: String) async -> ActionReceipt
 }
 public protocol SpotifyPlaybackController: AnyObject {
     func playPlaylist(reference: String) async -> ActionReceipt
 }
 public protocol SpaceController: AnyObject { func switchSpace(direction: Int) async -> ActionReceipt }
 public protocol ScreenCaptureService: AnyObject { func screenshot() async throws -> URL }
+public protocol ScreenAnalyzer: AnyObject { func analyze(imageAt url: URL, question: String) async throws -> String }
 public protocol CameraCaptureService: AnyObject { func capturePhoto() async throws -> URL }
 public protocol RecordingService: AnyObject { func stopRecording() async -> ActionReceipt }
 public protocol SystemActionService: AnyObject { func perform(_ operation: SystemOperation, confirmed: Bool) async -> ActionReceipt }
@@ -99,8 +102,8 @@ public protocol ToolRegistry: AnyObject { func schemas() -> [ToolDefinition] }
 public protocol ActionExecutor: AnyObject { func execute(_ call: ToolCall, confirmed: Bool) async -> ActionReceipt }
 public protocol PermissionPolicy: AnyObject { func requiresConfirmation(for tool: ToolName) -> Bool }
 public protocol ActionReceiptStore: AnyObject { func append(_ receipt: ActionReceipt) async; func recent(limit: Int) async -> [ActionReceipt] }
-public protocol MemoryStore: AnyObject { func remember(key: String, value: String, sensitivity: MemorySensitivity) async throws; func search(_ query: String) async throws -> [MemoryItem] }
-public protocol WorkflowStore: AnyObject { func save(_ workflow: Workflow) async throws; func all() async throws -> [Workflow] }
+public protocol MemoryStore: AnyObject { func remember(key: String, value: String, sensitivity: MemorySensitivity) async throws; func search(_ query: String) async throws -> [MemoryItem]; func forget(key: String) async throws -> Bool; func clear() async throws }
+public protocol WorkflowStore: AnyObject { func save(_ workflow: Workflow) async throws; func all() async throws -> [Workflow]; func delete(name: String) async throws -> Bool }
 public protocol WorkflowExecutor: AnyObject { func run(_ workflow: Workflow) async -> [ActionReceipt] }
 public protocol BrowserAutomationEngine: AnyObject { func checkAvailability() async -> Bool; func cancel() async }
 public protocol Clock { func now() -> Date }

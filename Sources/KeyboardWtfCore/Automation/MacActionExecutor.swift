@@ -10,21 +10,30 @@ public final class MacActionExecutor: ActionExecutor {
     private let files: FileSearchService
     private let windows: WindowController
     private let screen: ScreenCaptureService
+    private let camera: CameraCaptureService
+    private let screenAnalyzer: ScreenAnalyzer
     private let spotify: SpotifyPlaybackController
     private let memory: MemoryStore
     private let workflows: WorkflowStore
     private let decoder = JSONDecoder()
-    public init(apps: AppResolver, delivery: TextDeliveryService, selectedText: SelectedTextProvider, clipboard: ClipboardService, system: SystemActionService, files: FileSearchService, windows: WindowController, screen: ScreenCaptureService, memory: MemoryStore, workflows: WorkflowStore, spotify: SpotifyPlaybackController = MacSpotifyPlaybackController()) { self.apps = apps; self.delivery = delivery; self.selectedText = selectedText; self.clipboard = clipboard; self.system = system; self.files = files; self.windows = windows; self.screen = screen; self.memory = memory; self.workflows = workflows; self.spotify = spotify }
+    public init(apps: AppResolver, delivery: TextDeliveryService, selectedText: SelectedTextProvider, clipboard: ClipboardService, system: SystemActionService, files: FileSearchService, windows: WindowController, screen: ScreenCaptureService, memory: MemoryStore, workflows: WorkflowStore, spotify: SpotifyPlaybackController = MacSpotifyPlaybackController(), screenAnalyzer: ScreenAnalyzer = UnavailableScreenAnalyzer(), camera: CameraCaptureService = MacCameraCaptureService()) { self.apps = apps; self.delivery = delivery; self.selectedText = selectedText; self.clipboard = clipboard; self.system = system; self.files = files; self.windows = windows; self.screen = screen; self.camera = camera; self.memory = memory; self.workflows = workflows; self.spotify = spotify; self.screenAnalyzer = screenAnalyzer }
 
     public func execute(_ call: ToolCall, confirmed: Bool) async -> ActionReceipt {
         switch call.name {
         case .openApp:
             guard let args = decode(NameArguments.self, call) else { return invalid(call) }
-            switch await apps.resolve(args.name) {
-            case let .resolved(candidate): return await apps.open(candidate)
-            case let .ambiguous(candidates): return ActionReceipt(toolName: call.name, requestedTarget: args.name, success: false, verified: false, summary: "I found multiple matches: \(candidates.map(\.name).joined(separator: ", ")).", failureCategory: .ambiguous)
-            case .notFound: return ActionReceipt(toolName: call.name, requestedTarget: args.name, success: false, verified: false, summary: "I could not find \(args.name).", failureCategory: .notFound)
+            return await openApplication(named: args.name)
+        case .openApps:
+            guard let args = decode(NamesArguments.self, call) else { return invalid(call) }
+            let names = args.names.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+            guard !names.isEmpty else { return invalid(call) }
+            var summaries = [String](); var allSucceeded = true
+            for name in names {
+                let receipt = await openApplication(named: name)
+                allSucceeded = allSucceeded && receipt.success
+                summaries.append(receipt.summary)
             }
+            return ActionReceipt(toolName: call.name, requestedTarget: args.names, success: allSucceeded, verified: allSucceeded, summary: summaries.joined(separator: " "), failureCategory: allSucceeded ? .none : .unknown)
         case .focusApp:
             guard let args = decode(NameArguments.self, call) else { return invalid(call) }
             switch await apps.resolve(args.name) {
@@ -39,12 +48,17 @@ public final class MacActionExecutor: ActionExecutor {
             case let .ambiguous(candidates): return ActionReceipt(toolName: call.name, requestedTarget: args.name, success: false, verified: false, summary: "I found multiple matches: \(candidates.map(\.name).joined(separator: ", ")).", failureCategory: .ambiguous)
             case .notFound: return ActionReceipt(toolName: call.name, requestedTarget: args.name, success: false, verified: false, summary: "I could not find \(args.name).", failureCategory: .notFound)
             }
-        case .openURL, .webSearch:
+        case .openURL:
             guard let args = decode(URLArguments.self, call) else { return invalid(call) }
-            let raw = call.name == .webSearch ? "https://www.google.com/search?q=\(args.url.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")" : args.url
-            guard let url = URL(string: raw), ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return ActionReceipt(toolName: call.name, requestedTarget: args.url, success: false, verified: false, summary: "Only secure web URLs can be opened.", failureCategory: .validation) }
+            guard let url = URL(string: args.url), ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return ActionReceipt(toolName: call.name, requestedTarget: args.url, success: false, verified: false, summary: "Only secure web URLs can be opened.", failureCategory: .validation) }
             let success = NSWorkspace.shared.open(url)
-            return ActionReceipt(toolName: call.name, requestedTarget: args.url, resolvedTarget: url.absoluteString, success: success, verified: success, summary: success ? "Opened \(call.name == .webSearch ? "search" : "URL")." : "Could not open that URL.", failureCategory: success ? .none : .unknown)
+            return ActionReceipt(toolName: call.name, requestedTarget: args.url, resolvedTarget: url.absoluteString, success: success, verified: success, summary: success ? "Opened URL." : "Could not open that URL.", failureCategory: success ? .none : .unknown)
+        case .webSearch:
+            guard let args = decode(SearchArguments.self, call), !args.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return invalid(call) }
+            let encoded = args.query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+            guard let url = URL(string: "https://www.google.com/search?q=\(encoded)") else { return invalid(call) }
+            let success = NSWorkspace.shared.open(url)
+            return ActionReceipt(toolName: call.name, requestedTarget: args.query, resolvedTarget: url.absoluteString, success: success, verified: success, summary: success ? "Opened web search for \(args.query)." : "Could not open that search.", failureCategory: success ? .none : .unknown)
         case .typeText:
             guard let args = decode(TextArguments.self, call) else { return invalid(call) }
             let receipt = await delivery.deliver(args.text, mode: .typeIntoFocusedApp)
@@ -56,7 +70,7 @@ public final class MacActionExecutor: ActionExecutor {
             guard let args = decode(PlaylistArguments.self, call) else { return invalid(call) }
             return await spotify.playPlaylist(reference: args.reference)
         case .getSelectedText:
-            let context = await selectedText.capture(); return ActionReceipt(toolName: .getSelectedText, requestedTarget: "selected text", success: !context.text.isEmpty, verified: context.method == .accessibility, summary: context.text.isEmpty ? "No selected text is available." : "Captured selected text.", failureCategory: context.text.isEmpty ? .notFound : .none)
+            let context = await selectedText.capture(); return ActionReceipt(toolName: .getSelectedText, requestedTarget: "selected text", success: !context.text.isEmpty, verified: context.method == .accessibility, summary: context.text.isEmpty ? "No selected text is available." : "Selected text: \(context.text)", failureCategory: context.text.isEmpty ? .notFound : .none)
         case .listRunningApps:
             let names = NSWorkspace.shared.runningApplications.compactMap(\.localizedName).sorted()
             return ActionReceipt(toolName: call.name, requestedTarget: "running apps", success: true, verified: true, summary: names.prefix(20).joined(separator: ", "))
@@ -69,6 +83,12 @@ public final class MacActionExecutor: ActionExecutor {
         case .minimiseWindow:
             guard let args = decode(TitleArguments.self, call) else { return invalid(call) }
             return await windows.minimiseWindow(matching: args.title)
+        case .maximiseWindow:
+            guard let args = decode(TitleArguments.self, call) else { return invalid(call) }
+            return await windows.maximiseWindow(matching: args.title)
+        case .closeWindow:
+            guard let args = decode(TitleArguments.self, call) else { return invalid(call) }
+            return await windows.closeWindow(matching: args.title)
         case .takeScreenshot:
             do {
                 let url = try await screen.screenshot()
@@ -77,6 +97,27 @@ public final class MacActionExecutor: ActionExecutor {
                 return ActionReceipt(toolName: call.name, requestedTarget: "screen", success: false, verified: false, summary: "Screen Recording permission is required before taking a screenshot.", failureCategory: .permission, permissionBlocked: true)
             } catch {
                 return ActionReceipt(toolName: call.name, requestedTarget: "screen", success: false, verified: false, summary: "Could not capture the screen.", failureCategory: .unknown)
+            }
+        case .inspectScreen:
+            guard let args = decode(ScreenQuestionArguments.self, call) else { return invalid(call) }
+            do {
+                let url = try await screen.screenshot()
+                defer { try? FileManager.default.removeItem(at: url) }
+                let analysis = try await screenAnalyzer.analyze(imageAt: url, question: args.question)
+                return ActionReceipt(toolName: call.name, requestedTarget: "screen", success: true, verified: true, summary: analysis)
+            } catch AppError.permission {
+                return ActionReceipt(toolName: call.name, requestedTarget: "screen", success: false, verified: false, summary: "Screen Recording permission is required before analyzing the screen.", failureCategory: .permission, permissionBlocked: true)
+            } catch {
+                return ActionReceipt(toolName: call.name, requestedTarget: "screen", success: false, verified: false, summary: error.localizedDescription, failureCategory: .unknown)
+            }
+        case .takeWebcamPhoto:
+            do {
+                let url = try await camera.capturePhoto()
+                return ActionReceipt(toolName: call.name, requestedTarget: "camera", resolvedTarget: url.path, success: true, verified: FileManager.default.fileExists(atPath: url.path), summary: "Saved a camera photo to \(url.lastPathComponent).")
+            } catch AppError.permission {
+                return ActionReceipt(toolName: call.name, requestedTarget: "camera", success: false, verified: false, summary: "Camera permission is required before taking a photo.", failureCategory: .permission, permissionBlocked: true)
+            } catch {
+                return ActionReceipt(toolName: call.name, requestedTarget: "camera", success: false, verified: false, summary: error.localizedDescription, failureCategory: .unknown)
             }
         case .searchFiles:
             guard let args = decode(SearchArguments.self, call) else { return invalid(call) }
@@ -97,6 +138,15 @@ public final class MacActionExecutor: ActionExecutor {
         case .remember:
             guard let args = decode(MemoryArguments.self, call) else { return invalid(call) }
             do { try await memory.remember(key: args.key, value: args.value, sensitivity: .ordinary); return ActionReceipt(toolName: call.name, requestedTarget: args.key, success: true, verified: true, summary: "Remembered \(args.key).") } catch { return ActionReceipt(toolName: call.name, requestedTarget: args.key, success: false, verified: false, summary: error.localizedDescription, failureCategory: .validation) }
+        case .forget:
+            guard let args = decode(NameArguments.self, call) else { return invalid(call) }
+            do {
+                let removed = try await memory.forget(key: args.name)
+                return ActionReceipt(toolName: call.name, requestedTarget: args.name, success: removed, verified: removed, summary: removed ? "Forgot \(args.name)." : "No memory named \(args.name) was found.", failureCategory: removed ? .none : .notFound)
+            } catch { return ActionReceipt(toolName: call.name, requestedTarget: args.name, success: false, verified: false, summary: "Could not remove that memory.", failureCategory: .unknown) }
+        case .clearMemory:
+            do { try await memory.clear(); return ActionReceipt(toolName: call.name, requestedTarget: "all memories", success: true, verified: true, summary: "Cleared all saved memories.") }
+            catch { return ActionReceipt(toolName: call.name, requestedTarget: "all memories", success: false, verified: false, summary: "Could not clear saved memories.", failureCategory: .unknown) }
         case .searchMemory:
             guard let args = decode(SearchArguments.self, call) else { return invalid(call) }
             do { let results = try await memory.search(args.query); return ActionReceipt(toolName: call.name, requestedTarget: args.query, success: !results.isEmpty, verified: true, summary: results.map { "\($0.key): \($0.value)" }.joined(separator: " • "), failureCategory: results.isEmpty ? .notFound : .none) } catch { return ActionReceipt(toolName: call.name, requestedTarget: args.query, success: false, verified: false, summary: "Memory search failed.", failureCategory: .unknown) }
@@ -105,6 +155,12 @@ public final class MacActionExecutor: ActionExecutor {
             do { let workflow = Workflow(name: args.name, triggers: args.triggers.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }, steps: steps); try await workflows.save(workflow); return ActionReceipt(toolName: call.name, requestedTarget: workflow.name, success: true, verified: true, summary: "Saved workflow \(workflow.name).") } catch { return ActionReceipt(toolName: call.name, requestedTarget: args.name, success: false, verified: false, summary: "Could not save workflow.", failureCategory: .validation) }
         case .listWorkflows:
             do { let items = try await workflows.all(); return ActionReceipt(toolName: call.name, requestedTarget: "workflows", success: true, verified: true, summary: items.map(\.name).joined(separator: ", ")) } catch { return ActionReceipt(toolName: call.name, requestedTarget: "workflows", success: false, verified: false, summary: "Could not load workflows.", failureCategory: .unknown) }
+        case .deleteWorkflow:
+            guard let args = decode(NameArguments.self, call) else { return invalid(call) }
+            do {
+                let removed = try await workflows.delete(name: args.name)
+                return ActionReceipt(toolName: call.name, requestedTarget: args.name, success: removed, verified: removed, summary: removed ? "Deleted workflow \(args.name)." : "No workflow named \(args.name) was found.", failureCategory: removed ? .none : .notFound)
+            } catch { return ActionReceipt(toolName: call.name, requestedTarget: args.name, success: false, verified: false, summary: "Could not delete workflow.", failureCategory: .unknown) }
         case .runWorkflow:
             guard let args = decode(NameArguments.self, call) else { return invalid(call) }
             do {
@@ -122,6 +178,14 @@ public final class MacActionExecutor: ActionExecutor {
         }
     }
 
+    private func openApplication(named name: String) async -> ActionReceipt {
+        switch await apps.resolve(name) {
+        case let .resolved(candidate): return await apps.open(candidate)
+        case let .ambiguous(candidates): return ActionReceipt(toolName: .openApp, requestedTarget: name, success: false, verified: false, summary: "I found multiple matches: \(candidates.map(\.name).joined(separator: ", ")).", failureCategory: .ambiguous)
+        case .notFound: return ActionReceipt(toolName: .openApp, requestedTarget: name, success: false, verified: false, summary: "I could not find \(name).", failureCategory: .notFound)
+        }
+    }
+
     private func decode<T: Decodable>(_ type: T.Type, _ call: ToolCall) -> T? { try? decoder.decode(type, from: Data(call.argumentsJSON.utf8)) }
     private func invalid(_ call: ToolCall) -> ActionReceipt { ActionReceipt(toolName: call.name, requestedTarget: "", success: false, verified: false, summary: "The requested action had invalid arguments.", failureCategory: .validation) }
     private func defaultSearchRoots() -> [URL] { let manager = FileManager.default; return [.desktopDirectory, .documentDirectory, .downloadsDirectory, .picturesDirectory, .moviesDirectory, .musicDirectory].compactMap { manager.urls(for: $0, in: .userDomainMask).first } }
@@ -130,6 +194,7 @@ public final class MacActionExecutor: ActionExecutor {
 }
 
 private struct NameArguments: Decodable { let name: String }
+private struct NamesArguments: Decodable { let names: String }
 private struct URLArguments: Decodable { let url: String }
 private struct TextArguments: Decodable { let text: String }
 private struct SearchArguments: Decodable { let query: String }
@@ -138,3 +203,9 @@ private struct TitleArguments: Decodable { let title: String }
 private struct MemoryArguments: Decodable { let key: String; let value: String }
 private struct WorkflowArguments: Decodable { let name: String; let triggers: String; let steps: String }
 private struct PlaylistArguments: Decodable { let reference: String }
+private struct ScreenQuestionArguments: Decodable { let question: String }
+
+public final class UnavailableScreenAnalyzer: ScreenAnalyzer {
+    public init() {}
+    public func analyze(imageAt url: URL, question: String) async throws -> String { throw AppError.unsupported("Screen analysis is unavailable in this configuration.") }
+}

@@ -38,12 +38,80 @@ struct SettingsView: View {
                     TextField("Open Settings", text: Binding(get: { environment.settings.settings.settingsShortcut }, set: { environment.settings.settings.settingsShortcut = $0 }))
                     HStack { Button("Apply hotkeys") { do { try environment.hotkeys.register(environment.settings.settings) } catch { keyStatus = error.localizedDescription } }; Spacer(); Text("Use Control + Option combinations.").font(.caption).foregroundStyle(.secondary) }
                 }.padding().tabItem { Label("Hotkeys", systemImage: "command") }
+                DataSettingsView(environment: environment).tabItem { Label("Data", systemImage: "externaldrive") }
                 PermissionSettingsView(center: environment.permissionCenter).tabItem { Label("Permissions", systemImage: "checkmark.shield") }
-            }.frame(width: 620, height: 420).onAppear { keyStatus = isConfigured(environment) ? "Configured" : "Not configured" }
+            }.frame(width: 700, height: 500).onAppear { keyStatus = isConfigured(environment) ? "Configured" : "Not configured" }
         } else { Text("keyboard.wtf could not start its local storage.").padding() }
     }
     @MainActor private func saveKey(_ environment: AppEnvironment) { do { try environment.credentials.save(apiKey: apiKey); apiKey = ""; keyStatus = "Configured" } catch { keyStatus = "Could not save key" } }
     @MainActor private func isConfigured(_ environment: AppEnvironment) -> Bool { do { return try environment.credentials.apiKey()?.isEmpty == false } catch { return false } }
+}
+
+private struct DataSettingsView: View {
+    let environment: AppEnvironment
+    @State private var receipts = [ActionReceipt]()
+    @State private var memories = [MemoryItem]()
+    @State private var workflows = [Workflow]()
+    @State private var status = "Loading…"
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Local data").font(.headline)
+                Spacer()
+                Button("Refresh") { Task { await refresh() } }
+                Button("Clear memories", role: .destructive) { Task { try? await environment.memoryStore.clear(); await refresh() } }
+            }
+            Text("History, memories, and workflows stay on this Mac. API keys remain in Keychain.")
+                .font(.caption).foregroundStyle(.secondary)
+            List {
+                Section("Memories") {
+                    if memories.isEmpty { Text("No saved memories.").foregroundStyle(.secondary) }
+                    ForEach(memories) { item in
+                        HStack {
+                            VStack(alignment: .leading) { Text(item.key); Text(item.value).font(.caption).foregroundStyle(.secondary) }
+                            Spacer()
+                            Button("Forget", role: .destructive) { Task { _ = try? await environment.memoryStore.forget(key: item.key); await refresh() } }
+                        }
+                    }
+                }
+                Section("Workflows") {
+                    if workflows.isEmpty { Text("No saved workflows.").foregroundStyle(.secondary) }
+                    ForEach(workflows) { workflow in
+                        HStack {
+                            VStack(alignment: .leading) { Text(workflow.name); Text(workflow.triggers.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary) }
+                            Spacer()
+                            Button("Delete", role: .destructive) { Task { _ = try? await environment.workflowStore.delete(name: workflow.name); await refresh() } }
+                        }
+                    }
+                }
+                Section("Recent actions") {
+                    if receipts.isEmpty { Text("No action receipts yet.").foregroundStyle(.secondary) }
+                    ForEach(receipts) { receipt in
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack { Text(receipt.toolName.rawValue); Spacer(); Text(receipt.success ? "Succeeded" : "Failed").foregroundStyle(receipt.success ? .green : .red) }
+                            Text(receipt.summary).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                        }
+                    }
+                }
+            }
+            Text(status).font(.caption).foregroundStyle(.secondary)
+        }
+        .padding()
+        .task { await refresh() }
+    }
+
+    @MainActor private func refresh() async {
+        do {
+            async let loadedReceipts = environment.receiptStore.recent(limit: 30)
+            async let loadedMemories = environment.memoryStore.search("")
+            async let loadedWorkflows = environment.workflowStore.all()
+            receipts = await loadedReceipts
+            memories = try await loadedMemories
+            workflows = try await loadedWorkflows
+            status = "Updated just now"
+        } catch { status = "Could not load local data: \(error.localizedDescription)" }
+    }
 }
 
 private struct LaunchAtLoginControl: View {

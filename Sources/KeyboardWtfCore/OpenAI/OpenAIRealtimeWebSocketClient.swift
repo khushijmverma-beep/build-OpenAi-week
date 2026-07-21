@@ -12,6 +12,8 @@ public final class OpenAIRealtimeWebSocketClient: OpenAIRealtimeClient {
     private var lastOutputItemID: String?
     private var installationHash: String
     private var currentResponseAudioBytes = 0
+    private var sessionConfigured = false
+    private var connectionError: AppError?
 
     public init(credentials: CredentialProvider, session: URLSession = .shared, logger: Logger = RedactingLogger()) {
         var continuation: AsyncStream<RealtimeEvent>.Continuation!
@@ -34,11 +36,14 @@ public final class OpenAIRealtimeWebSocketClient: OpenAIRealtimeClient {
         let task = session.webSocketTask(with: request)
         socket = task
         task.resume()
+        sessionConfigured = false
+        connectionError = nil
         // Start receiving before configuration is sent so that a quick server-side
         // rejection is observed instead of leaving the overlay in a listening state.
         receiver = Task { [weak self] in await self?.receiveLoop(socket: task) }
         do {
             try await send(sessionUpdate(configuration))
+            try await waitForSessionConfiguration()
             logger.info("realtime.connected", metadata: ["model": configuration.model])
             continuation.yield(.connected)
         } catch {
@@ -75,7 +80,7 @@ public final class OpenAIRealtimeWebSocketClient: OpenAIRealtimeClient {
 
     public func disconnect() async {
         receiver?.cancel(); receiver = nil
-        socket?.cancel(with: .normalClosure, reason: nil); socket = nil; lastOutputItemID = nil; currentResponseAudioBytes = 0
+        socket?.cancel(with: .normalClosure, reason: nil); socket = nil; lastOutputItemID = nil; currentResponseAudioBytes = 0; sessionConfigured = false; connectionError = nil
         logger.info("realtime.disconnected", metadata: [:])
     }
 
@@ -92,7 +97,9 @@ public final class OpenAIRealtimeWebSocketClient: OpenAIRealtimeClient {
         } catch {
             if !Task.isCancelled {
                 logger.error("realtime.receive_failed", metadata: ["error": error.localizedDescription])
-                continuation.yield(.error(classify(error)))
+                let classified = classify(error)
+                connectionError = classified
+                continuation.yield(.error(classified))
             }
         }
     }
@@ -102,6 +109,7 @@ public final class OpenAIRealtimeWebSocketClient: OpenAIRealtimeClient {
         switch type {
         case "session.created", "session.updated":
             logger.info("realtime.session_event", metadata: ["type": type])
+            if type == "session.updated" { sessionConfigured = true }
             continuation.yield(.sessionUpdated)
         case "input_audio_buffer.speech_started":
             logger.info("realtime.speech_started", metadata: [:])
@@ -133,7 +141,9 @@ public final class OpenAIRealtimeWebSocketClient: OpenAIRealtimeClient {
             let message = error?["message"] as? String ?? "Realtime request failed"
             let code = error?["code"] as? String ?? "unknown"
             logger.error("realtime.server_error", metadata: ["code": code, "message": message])
-            continuation.yield(.error(.realtimeTransport(message)))
+            let appError = AppError.realtimeTransport(message)
+            connectionError = appError
+            continuation.yield(.error(appError))
         default: break
         }
     }
@@ -143,6 +153,18 @@ public final class OpenAIRealtimeWebSocketClient: OpenAIRealtimeClient {
         let data = try JSONSerialization.data(withJSONObject: object)
         guard let text = String(data: data, encoding: .utf8) else { throw AppError.malformedResponse("Could not encode event") }
         try await socket.send(.string(text))
+    }
+
+    private func waitForSessionConfiguration() async throws {
+        // Do not let the overlay claim it is listening until the server has
+        // accepted the session configuration. A WebSocket can otherwise stay
+        // open indefinitely after a bad model, key, or network transition.
+        for _ in 0..<100 {
+            if sessionConfigured { return }
+            if let connectionError { throw connectionError }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        throw AppError.realtimeTransport("Realtime session setup timed out after 10 seconds.")
     }
 
     private func sessionUpdate(_ configuration: RealtimeConfiguration) -> [String: Any] {

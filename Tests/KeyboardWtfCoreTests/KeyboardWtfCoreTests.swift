@@ -54,10 +54,22 @@ final class KeyboardWtfCoreTests: XCTestCase {
         try await store.remember(key: "browser", value: "Safari", sensitivity: .ordinary)
         let memories = try await store.search("browser")
         XCTAssertEqual(memories.first?.value, "Safari")
+        let forgotBrowser = try await store.forget(key: "browser")
+        XCTAssertTrue(forgotBrowser)
+        let afterForget = try await store.search("browser")
+        XCTAssertTrue(afterForget.isEmpty)
+        try await store.remember(key: "name", value: "Alex", sensitivity: .ordinary)
+        try await store.clear()
+        let afterClear = try await store.search("name")
+        XCTAssertTrue(afterClear.isEmpty)
         let workflow = Workflow(name: "work setup", triggers: ["start work"], steps: [WorkflowStep(tool: .openApp, argumentsJSON: "{\"name\":\"Safari\"}")])
         try await store.save(workflow)
         let workflows = try await store.all()
         XCTAssertEqual(workflows.first?.name, "work setup")
+        let deletedWorkflow = try await store.delete(name: "work setup")
+        XCTAssertTrue(deletedWorkflow)
+        let afterWorkflowDelete = try await store.all()
+        XCTAssertTrue(afterWorkflowDelete.isEmpty)
     }
 
     func testLiveResponsesSmokeWhenExplicitlyEnabled() async throws {
@@ -78,15 +90,10 @@ final class KeyboardWtfCoreTests: XCTestCase {
         }
 
         let client = OpenAIRealtimeWebSocketClient(credentials: KeychainCredentialProvider())
-        let listApps = ToolDefinition(
-            name: .listRunningApps,
-            description: "Return a list of running applications.",
-            parameters: []
-        )
         try await client.connect(configuration: RealtimeConfiguration(
             assistantName: "Jarvis test",
             instructions: "For every user message, call list_running_apps before replying. Do not describe the action yourself.",
-            tools: [listApps]
+            tools: DefaultToolRegistry().schemas()
         ))
         defer { Task { await client.disconnect() } }
 

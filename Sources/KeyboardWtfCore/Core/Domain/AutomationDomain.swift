@@ -30,10 +30,12 @@ public enum ToolName: String, Codable, CaseIterable, Sendable {
     case getSystemStatus = "get_system_status"
     case remember
     case forget
+    case clearMemory = "clear_memory"
     case searchMemory = "search_memory"
     case createWorkflow = "create_workflow"
     case runWorkflow = "run_workflow"
     case listWorkflows = "list_workflows"
+    case deleteWorkflow = "delete_workflow"
     case lockMac = "lock_mac"
     case sleepMac = "sleep_mac"
     case restartMac = "restart_mac"

@@ -42,8 +42,29 @@ public actor SQLiteStore: ActionReceiptStore, MemoryStore, WorkflowStore {
         }
     }
 
+    public func forget(key: String) async throws -> Bool {
+        let clean = key.compactWhitespace
+        let matches = try queryRows("SELECT id FROM personal_memories WHERE memory_key = ? COLLATE NOCASE", [clean])
+        guard !matches.isEmpty else { return false }
+        try execute("DELETE FROM personal_memories WHERE memory_key = ? COLLATE NOCASE", [clean])
+        try execute("DELETE FROM memory_fts WHERE memory_key = ?", [clean])
+        return true
+    }
+
+    public func clear() async throws {
+        try execute("DELETE FROM personal_memories", [])
+        try execute("DELETE FROM memory_fts", [])
+    }
+
     public func save(_ workflow: Workflow) async throws { try execute("INSERT OR REPLACE INTO workflows(id, name, workflow_json, updated_at) VALUES(?, ?, ?, ?)", [workflow.id.uuidString, workflow.name, encode(workflow), String(Date().timeIntervalSince1970)]) }
     public func all() async throws -> [Workflow] { try query("SELECT workflow_json FROM workflows ORDER BY updated_at DESC").compactMap { decode(Workflow.self, $0[0]) } }
+    public func delete(name: String) async throws -> Bool {
+        let clean = name.compactWhitespace
+        let matches = try queryRows("SELECT id FROM workflows WHERE name = ? COLLATE NOCASE", [clean])
+        guard !matches.isEmpty else { return false }
+        try execute("DELETE FROM workflows WHERE name = ? COLLATE NOCASE", [clean])
+        return true
+    }
 
     private static func migrate(_ database: OpaquePointer?) throws {
         try executeRaw(database, "CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY)")

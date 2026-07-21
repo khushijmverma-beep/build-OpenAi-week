@@ -193,6 +193,8 @@ public final class MacWindowController: WindowController {
 
     public func focusWindow(matching title: String) async -> ActionReceipt { await updateWindow(matching: title, tool: .focusWindow, action: kAXRaiseAction as String) }
     public func minimiseWindow(matching title: String) async -> ActionReceipt { await updateWindow(matching: title, tool: .minimiseWindow, action: nil) }
+    public func maximiseWindow(matching title: String) async -> ActionReceipt { await updateWindow(matching: title, tool: .maximiseWindow, action: "AXZoomAction") }
+    public func closeWindow(matching title: String) async -> ActionReceipt { await updateWindow(matching: title, tool: .closeWindow, action: "AXCloseAction") }
 
     private func updateWindow(matching title: String, tool: ToolName, action: String?) async -> ActionReceipt {
         let started = Date()
@@ -207,7 +209,8 @@ public final class MacWindowController: WindowController {
                 if let action { status = AXUIElementPerformAction(window, action as CFString) }
                 else { status = AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanTrue) }
                 let success = status == .success
-                return ActionReceipt(toolName: tool, requestedTarget: title, resolvedTarget: windowTitle, success: success, verified: success, summary: success ? "\(tool == .focusWindow ? "Focused" : "Minimised") \(windowTitle)." : "macOS did not allow that window action.", startedAt: started, endedAt: Date(), failureCategory: success ? .none : .permission, permissionBlocked: !success)
+                let verb = tool == .focusWindow ? "Focused" : (tool == .minimiseWindow ? "Minimised" : (tool == .maximiseWindow ? "Maximised" : "Closed"))
+                return ActionReceipt(toolName: tool, requestedTarget: title, resolvedTarget: windowTitle, success: success, verified: success, summary: success ? "\(verb) \(windowTitle)." : "macOS did not allow that window action.", startedAt: started, endedAt: Date(), failureCategory: success ? .none : .permission, permissionBlocked: !success)
             }
         }
         return ActionReceipt(toolName: tool, requestedTarget: title, success: false, verified: false, summary: "No accessible window matched \(title).", startedAt: started, endedAt: Date(), failureCategory: .notFound)
@@ -233,6 +236,7 @@ public final class DefaultToolRegistry: ToolRegistry {
     public func schemas() -> [ToolDefinition] {
         [
             ToolDefinition(name: .openApp, description: "Open an installed macOS application by name.", parameters: [ToolParameter(name: "name", type: .string, description: "Application name")]),
+            ToolDefinition(name: .openApps, description: "Open multiple installed macOS applications. Pass names as a comma-separated string.", parameters: [ToolParameter(name: "names", type: .string, description: "Comma-separated application names")]),
             ToolDefinition(name: .focusApp, description: "Bring a running macOS application to the front.", parameters: [ToolParameter(name: "name", type: .string, description: "Application name")]),
             ToolDefinition(name: .closeApp, description: "Ask a running macOS application to quit normally. Never force-quit; macOS can request confirmation for unsaved work.", parameters: [ToolParameter(name: "name", type: .string, description: "Application name")]),
             ToolDefinition(name: .openURL, description: "Open a verified http or https URL.", parameters: [ToolParameter(name: "url", type: .string, description: "URL")]),
@@ -245,15 +249,22 @@ public final class DefaultToolRegistry: ToolRegistry {
             ToolDefinition(name: .listWindows, description: "List accessible windows.", parameters: []),
             ToolDefinition(name: .focusWindow, description: "Focus an accessible window by title.", parameters: [ToolParameter(name: "title", type: .string, description: "Window title")]),
             ToolDefinition(name: .minimiseWindow, description: "Minimise an accessible window by title.", parameters: [ToolParameter(name: "title", type: .string, description: "Window title")]),
+            ToolDefinition(name: .maximiseWindow, description: "Maximise or zoom an accessible window by title where macOS supports it.", parameters: [ToolParameter(name: "title", type: .string, description: "Window title")]),
+            ToolDefinition(name: .closeWindow, description: "Close one accessible window by title using its normal close action.", parameters: [ToolParameter(name: "title", type: .string, description: "Window title")]),
             ToolDefinition(name: .takeScreenshot, description: "Take an explicit screenshot and save it locally. Requires Screen Recording permission.", parameters: []),
+            ToolDefinition(name: .takeWebcamPhoto, description: "Take one photo with the Mac camera only after the user explicitly asks.", parameters: []),
+            ToolDefinition(name: .inspectScreen, description: "Capture and analyze the visible screen only when the user explicitly asks to analyze, explain, or navigate their screen.", parameters: [ToolParameter(name: "question", type: .string, description: "The user's explicit screen-analysis question")]),
             ToolDefinition(name: .searchFiles, description: "Search user-approved folders for a filename.", parameters: [ToolParameter(name: "query", type: .string, description: "Filename or phrase")]),
             ToolDefinition(name: .openFile, description: "Open an approved, non-executable local file.", parameters: [ToolParameter(name: "path", type: .string, description: "Absolute file path")]),
             ToolDefinition(name: .openFolder, description: "Open an approved local folder.", parameters: [ToolParameter(name: "path", type: .string, description: "Absolute folder path")]),
             ToolDefinition(name: .remember, description: "Store an explicit non-sensitive preference locally.", parameters: [ToolParameter(name: "key", type: .string, description: "Memory label"), ToolParameter(name: "value", type: .string, description: "Preference")]),
+            ToolDefinition(name: .forget, description: "Delete one saved local memory by its label.", parameters: [ToolParameter(name: "name", type: .string, description: "Memory label")]),
+            ToolDefinition(name: .clearMemory, description: "Delete all saved local memories only when the user explicitly asks to clear memory.", parameters: []),
             ToolDefinition(name: .searchMemory, description: "Search explicit local memories.", parameters: [ToolParameter(name: "query", type: .string, description: "Memory query")]),
             ToolDefinition(name: .createWorkflow, description: "Create a user-approved workflow of typed tools.", parameters: [ToolParameter(name: "name", type: .string, description: "Workflow name"), ToolParameter(name: "triggers", type: .string, description: "Comma-separated triggers"), ToolParameter(name: "steps", type: .string, description: "JSON workflow steps")]),
             ToolDefinition(name: .runWorkflow, description: "Run an explicit saved workflow.", parameters: [ToolParameter(name: "name", type: .string, description: "Workflow name")]),
             ToolDefinition(name: .listWorkflows, description: "List saved workflows.", parameters: []),
+            ToolDefinition(name: .deleteWorkflow, description: "Delete one saved workflow by name.", parameters: [ToolParameter(name: "name", type: .string, description: "Workflow name")]),
             ToolDefinition(name: .restartMac, description: "Request a macOS restart. This always needs fresh confirmation.", parameters: []),
             ToolDefinition(name: .shutDownMac, description: "Request a macOS shutdown. This always needs fresh confirmation.", parameters: [])
         ]

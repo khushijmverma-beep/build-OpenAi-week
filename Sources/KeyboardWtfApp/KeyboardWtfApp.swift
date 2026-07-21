@@ -22,7 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             environment.presentSettings = { [weak self] in self?.showSettings() }
             overlay = OverlayPanelController(store: environment.state, coordinator: environment.coordinator)
             menuBar = MenuBarController(coordinator: environment.coordinator, openSettings: { [weak self] in self?.showSettings() })
-            do { try environment.hotkeys.registerDefaults() }
+            do { try environment.hotkeys.register(environment.settings.settings) }
             catch { environment.state.transition(to: AssistantSnapshot(phase: .error, title: "Hotkeys unavailable", detail: error.localizedDescription)) }
             showInitialSettingsIfNeeded()
         } catch {
