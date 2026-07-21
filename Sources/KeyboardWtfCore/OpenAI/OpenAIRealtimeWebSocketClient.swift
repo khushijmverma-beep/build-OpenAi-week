@@ -11,6 +11,7 @@ public final class OpenAIRealtimeWebSocketClient: OpenAIRealtimeClient {
     private var receiver: Task<Void, Never>?
     private var lastOutputItemID: String?
     private var installationHash: String
+    private var currentResponseAudioBytes = 0
 
     public init(credentials: CredentialProvider, session: URLSession = .shared, logger: Logger = RedactingLogger()) {
         var continuation: AsyncStream<RealtimeEvent>.Continuation!
@@ -71,7 +72,7 @@ public final class OpenAIRealtimeWebSocketClient: OpenAIRealtimeClient {
 
     public func disconnect() async {
         receiver?.cancel(); receiver = nil
-        socket?.cancel(with: .normalClosure, reason: nil); socket = nil; lastOutputItemID = nil
+        socket?.cancel(with: .normalClosure, reason: nil); socket = nil; lastOutputItemID = nil; currentResponseAudioBytes = 0
         logger.info("realtime.disconnected", metadata: [:])
     }
 
@@ -99,12 +100,19 @@ public final class OpenAIRealtimeWebSocketClient: OpenAIRealtimeClient {
         case "session.created", "session.updated":
             logger.info("realtime.session_event", metadata: ["type": type])
             continuation.yield(.sessionUpdated)
-        case "input_audio_buffer.speech_started": continuation.yield(.inputSpeechStarted)
-        case "input_audio_buffer.speech_stopped": continuation.yield(.inputSpeechStopped)
+        case "input_audio_buffer.speech_started":
+            logger.info("realtime.speech_started", metadata: [:])
+            continuation.yield(.inputSpeechStarted)
+        case "input_audio_buffer.speech_stopped":
+            logger.info("realtime.speech_stopped", metadata: [:])
+            continuation.yield(.inputSpeechStopped)
         case "conversation.item.created":
             if let item = object["item"] as? [String: Any], item["role"] as? String == "assistant" { lastOutputItemID = item["id"] as? String }
         case "response.output_audio.delta":
-            if let delta = object["delta"] as? String, let audio = Data(base64Encoded: delta) { continuation.yield(.outputAudio(audio)) }
+            if let delta = object["delta"] as? String, let audio = Data(base64Encoded: delta) {
+                currentResponseAudioBytes += audio.count
+                continuation.yield(.outputAudio(audio))
+            }
         case "response.output_audio_transcript.delta", "response.output_text.delta":
             if let delta = object["delta"] as? String { continuation.yield(.outputTranscriptDelta(delta)) }
         case "conversation.item.input_audio_transcription.delta":
@@ -113,7 +121,10 @@ public final class OpenAIRealtimeWebSocketClient: OpenAIRealtimeClient {
             if let item = object["item"] as? [String: Any], item["type"] as? String == "function_call", let id = item["call_id"] as? String, let name = item["name"] as? String, let tool = ToolName(rawValue: name), let arguments = item["arguments"] as? String { continuation.yield(.toolCall(ToolCall(id: id, name: tool, argumentsJSON: arguments))) }
         case "response.function_call_arguments.done":
             if let id = object["call_id"] as? String, let name = object["name"] as? String, let tool = ToolName(rawValue: name), let arguments = object["arguments"] as? String { continuation.yield(.toolCall(ToolCall(id: id, name: tool, argumentsJSON: arguments))) }
-        case "response.done": continuation.yield(.responseDone)
+        case "response.done":
+            logger.info("realtime.response_done", metadata: ["audio_bytes": "\(currentResponseAudioBytes)"])
+            currentResponseAudioBytes = 0
+            continuation.yield(.responseDone)
         case "error":
             let error = object["error"] as? [String: Any]
             let message = error?["message"] as? String ?? "Realtime request failed"
@@ -152,14 +163,17 @@ public final class OpenAIRealtimeWebSocketClient: OpenAIRealtimeClient {
                         "turn_detection": [
                             "type": "server_vad",
                             // Use an exactly representable value. JSONSerialization can
-                            // expand 0.45 to 17 decimal places, which the Realtime API
+                            // expand values such as 0.45 to 17 decimal places, which the Realtime API
                             // rejects during session.update.
-                            "threshold": 0.5,
+                            "threshold": 0.75,
                             "prefix_padding_ms": 300,
-                            "silence_duration_ms": 650,
+                            "silence_duration_ms": 900,
                             "create_response": true,
                             "interrupt_response": true
-                        ]
+                        ],
+                        // A MacBook microphone is normally several inches from the
+                        // speaker, so favour far-field filtering over reacting to room noise.
+                        "noise_reduction": ["type": "far_field"]
                     ],
                     "output": ["format": ["type": "audio/pcm", "rate": 24_000], "voice": configuration.voice]
                 ],

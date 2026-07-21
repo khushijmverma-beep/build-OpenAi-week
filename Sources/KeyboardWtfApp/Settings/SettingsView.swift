@@ -14,6 +14,12 @@ struct SettingsView: View {
                     Picker("Default delivery", selection: Binding(get: { environment.settings.settings.deliveryMode }, set: { environment.settings.settings.deliveryMode = $0 })) { Text("Type into focused app").tag(DeliveryMode.typeIntoFocusedApp); Text("Copy to clipboard").tag(DeliveryMode.copyToClipboard); Text("Ask each time").tag(DeliveryMode.askEachTime) }
                     Toggle("Auto-execute routine actions", isOn: Binding(get: { environment.settings.settings.autoExecuteRoutineActions }, set: { environment.settings.settings.autoExecuteRoutineActions = $0 }))
                     Toggle("Enable local wake phrase", isOn: Binding(get: { environment.settings.settings.wakePhraseEnabled }, set: { environment.settings.settings.wakePhraseEnabled = $0 })).disabled(true)
+                    HStack {
+                        Button("Start Jarvis") { Task { await environment.coordinator.start(mode: .jarvis) } }
+                        Button("Cancel Jarvis") { Task { await environment.coordinator.cancel() } }
+                        Spacer()
+                        Text("Use these to test without a hotkey.").font(.caption).foregroundStyle(.secondary)
+                    }
                     Divider()
                     LaunchAtLoginControl(settings: environment.settings, manager: environment.launchAtLogin)
                 }.padding().tabItem { Label("General", systemImage: "gear") }
