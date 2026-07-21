@@ -5,6 +5,7 @@ struct SettingsView: View {
     let environment: AppEnvironment?
     @State private var apiKey = ""
     @State private var keyStatus = "Not configured"
+    @State private var jarvisStatus = "Not tested"
     var body: some View {
         if let environment {
             TabView {
@@ -19,6 +20,7 @@ struct SettingsView: View {
                 Form {
                     SecureField("OpenAI API key", text: $apiKey)
                     HStack { Text(keyStatus).foregroundStyle(.secondary); Spacer(); Button("Save") { saveKey(environment) }; Button("Test Connection") { keyStatus = "Testing…"; Task { do { try await environment.testOpenAIConnection(); keyStatus = "Connection succeeded" } catch { keyStatus = error.localizedDescription } } }; Button("Delete", role: .destructive) { try? environment.credentials.delete(); apiKey = ""; keyStatus = "Not configured" } }
+                    HStack { Text(jarvisStatus).foregroundStyle(.secondary); Spacer(); Button("Test Jarvis Voice") { jarvisStatus = "Testing Realtime voice…"; Task { do { let bytes = try await environment.testJarvisVoiceConnection(); jarvisStatus = "Realtime voice succeeded (\(bytes) audio bytes received)" } catch { jarvisStatus = error.localizedDescription } } } }
                     Divider(); TextField("Realtime model", text: Binding(get: { environment.settings.settings.realtimeModel }, set: { environment.settings.settings.realtimeModel = $0 })); TextField("Fast Responses model", text: Binding(get: { environment.settings.settings.responsesModel }, set: { environment.settings.settings.responsesModel = $0 })); TextField("Reasoning model", text: Binding(get: { environment.settings.settings.reasoningModel }, set: { environment.settings.settings.reasoningModel = $0 }))
                     Text("Local BYOK mode is for personal development. Your key is stored in Keychain and is never shown after saving.").font(.caption).foregroundStyle(.secondary)
                 }.padding().tabItem { Label("OpenAI", systemImage: "key") }
@@ -27,6 +29,7 @@ struct SettingsView: View {
                     TextField("Smart Writing", text: Binding(get: { environment.settings.settings.smartWritingShortcut }, set: { environment.settings.settings.smartWritingShortcut = $0 }))
                     TextField("Jarvis", text: Binding(get: { environment.settings.settings.jarvisShortcut }, set: { environment.settings.settings.jarvisShortcut = $0 }))
                     TextField("Cancel", text: Binding(get: { environment.settings.settings.cancelShortcut }, set: { environment.settings.settings.cancelShortcut = $0 }))
+                    TextField("Open Settings", text: Binding(get: { environment.settings.settings.settingsShortcut }, set: { environment.settings.settings.settingsShortcut = $0 }))
                     HStack { Button("Apply hotkeys") { do { try environment.hotkeys.register(environment.settings.settings) } catch { keyStatus = error.localizedDescription } }; Spacer(); Text("Use Control + Option combinations.").font(.caption).foregroundStyle(.secondary) }
                 }.padding().tabItem { Label("Hotkeys", systemImage: "command") }
                 PermissionSettingsView(center: environment.permissionCenter).tabItem { Label("Permissions", systemImage: "checkmark.shield") }
