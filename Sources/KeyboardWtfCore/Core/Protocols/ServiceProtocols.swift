@@ -5,6 +5,7 @@ public protocol AssistantCoordinatorProtocol: AnyObject {
     func cancel() async
     func confirmPendingAction() async
     func setListeningPaused(_ paused: Bool) async -> Bool
+    func stopSpeakingAndListen() async -> Bool
 }
 
 @MainActor public protocol AssistantStateStore: AnyObject {

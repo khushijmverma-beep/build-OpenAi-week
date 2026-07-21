@@ -82,6 +82,23 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
             return false
         }
     }
+    public func stopSpeakingAndListen() async -> Bool {
+        guard activeMode == .jarvis else { return false }
+        audioPlayback.stop()
+        estimatedJarvisPlaybackEnd = nil
+        suppressJarvisInputUntil = nil
+        pendingWordInterruption = false
+        inputResponseTask?.cancel()
+        inputResponseTask = nil
+        inputResponseRequested = false
+        await realtime.interrupt()
+        guard !listeningPaused else {
+            state.transition(to: AssistantSnapshot(phase: .listening, mode: .jarvis, title: settings.settings.assistantName, detail: "Listening paused. Press Resume to listen again.", cancelHint: "⌃⌥X cancels"))
+            return true
+        }
+        state.transition(to: AssistantSnapshot(phase: .listening, mode: .jarvis, title: settings.settings.assistantName, detail: "Listening…", cancelHint: "⌃⌥X cancels"))
+        return true
+    }
     public func confirmPendingAction() async {
         guard let pendingTool, let confirmation, confirmation.isValid() else { state.transition(to: AssistantSnapshot(phase: .cancelled, title: "Confirmation expired", detail: "Nothing was executed.")); self.pendingTool = nil; self.confirmation = nil; return }
         self.pendingTool = nil; self.confirmation = nil
@@ -178,7 +195,7 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
 
     private func jarvisConfiguration() -> RealtimeConfiguration {
         let selectionContext = invocationSelection?.text.isEmpty == false ? " The user explicitly selected this context before invoking you: \(invocationSelection!.text). Use it only when relevant to their request; do not retain it." : ""
-        let instructions = "You are \(settings.settings.assistantName), a concise macOS assistant. Use typed tools only. Never claim an action succeeded without its returned receipt. When asked to draft or write an email, use compose_email with the desired app, recipient, subject, and body; it opens the compose window, fills each field, and leaves the draft unsent. Never click Send. When asked to type text, use type_text and do not submit the form. Close apps only with close_app; it performs a normal quit and never force-quits. If the user explicitly asks about the screen, use inspect_screen with their question; never capture a screen otherwise. If the user explicitly asks you to click a visible control or button, use click_screen with a precise target such as the search bar, Play, or Skip; never click merely because a control is visible. Screen clicking requires both Screen Recording and Accessibility permission. Never click delete, purchase, submit, send, publish, confirm, or another consequential control without first asking for a fresh confirmation. If the user refers to text currently selected, call get_selected_text before answering so the current selection is read at that moment. When selected text is present and the user asks to translate, summarize, rewrite, or make it professional, produce the transformation and use copy_text so the result is on the clipboard; never replace their selection unless they explicitly ask. When the user explicitly asks to play or pause the active media, use play_media; for an exact Spotify playlist, use play_spotify_playlist only with a Spotify playlist URI or share URL. Ask for the share link if the playlist name is ambiguous. Ask when ambiguous. Require a fresh confirmation for restart, shutdown, purchases, deletion, submission, or other irreversible actions.\(selectionContext)"
+        let instructions = "You are \(settings.settings.assistantName), a concise macOS task assistant. Use typed tools and act before speaking. For a task request, do not narrate steps or give a long explanation; after a successful task say exactly, or nearly exactly, ‘Alright, done.’ For a failure, give one short actionable sentence. When asked to create an email without naming an app, use compose_email with Gmail; it opens https://mail.google.com, scans the visible browser screen after each transition, fills To, Subject, and body, and leaves the draft unsent. Never click Send unless the user explicitly asks to send and confirms. When asked to type text, use type_text and do not submit the form. Close apps only with close_app; it performs a normal quit and never force-quits. For an explicit task that requires a visible UI, use inspect_screen or click_screen as needed after each screen transition; do not capture screens in the background or for unrelated conversation. Screen Recording and Accessibility are required for screen analysis/clicking. Never click delete, purchase, submit, send, publish, confirm, or another consequential control without first asking for a fresh confirmation. If the user refers to text currently selected, call get_selected_text before answering so the current selection is read at that moment. When selected text is present and the user asks to translate, summarize, rewrite, or make it professional, produce the transformation and use copy_text so the result is on the clipboard; never replace their selection unless explicitly asked. When the user explicitly asks to play or pause active media, use play_media; for an exact Spotify playlist, use play_spotify_playlist only with a Spotify playlist URI or share URL. Ask when ambiguous. Require a fresh confirmation for restart, shutdown, purchases, deletion, submission, sending, or other irreversible actions.\(selectionContext)"
         return RealtimeConfiguration(model: settings.settings.realtimeModel, assistantName: settings.settings.assistantName, instructions: instructions, tools: tools.schemas())
     }
 

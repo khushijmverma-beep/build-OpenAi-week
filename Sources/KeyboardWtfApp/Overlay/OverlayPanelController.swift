@@ -25,7 +25,8 @@ import SwiftUI
         panel.contentView = NSHostingView(rootView: AssistantOverlayView(
             store: store,
             confirm: { Task { await coordinator.confirmPendingAction() } },
-            setListeningPaused: { paused in await coordinator.setListeningPaused(paused) }
+            setListeningPaused: { paused in await coordinator.setListeningPaused(paused) },
+            stopSpeakingAndListen: { await coordinator.stopSpeakingAndListen() }
         ))
         observation = store.$snapshot.receive(on: RunLoop.main).sink { [weak self] snapshot in self?.update(snapshot) }
         screenObservation = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
@@ -72,6 +73,7 @@ private struct AssistantOverlayView: View {
     @ObservedObject var store: ObservableAssistantStateStore
     let confirm: () -> Void
     let setListeningPaused: (Bool) async -> Bool
+    let stopSpeakingAndListen: () async -> Bool
     @State private var listeningPaused = false
     @State private var pauseRequestInFlight = false
 
@@ -89,7 +91,26 @@ private struct AssistantOverlayView: View {
                 if let hint = snapshot.cancelHint { Text(hint).font(.caption).foregroundStyle(.tertiary) }
             }
             Spacer(minLength: 0)
-            if snapshot.mode == .jarvis && !snapshot.phase.isTerminal && snapshot.phase != .idle {
+            if snapshot.mode == .jarvis && snapshot.phase == .speaking {
+                Button {
+                    guard !pauseRequestInFlight else { return }
+                    pauseRequestInFlight = true
+                    Task { @MainActor in
+                        _ = await stopSpeakingAndListen()
+                        pauseRequestInFlight = false
+                    }
+                } label: {
+                    Image(systemName: "speaker.slash.fill")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .frame(width: 34, height: 34)
+                        .background(Color.white.opacity(0.12), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .disabled(pauseRequestInFlight)
+                .help("Stop speaking and listen")
+                .accessibilityLabel("Stop speaking and listen")
+            } else if snapshot.mode == .jarvis && !snapshot.phase.isTerminal && snapshot.phase != .idle {
                 Button {
                     let requestedPause = !listeningPaused
                     guard !pauseRequestInFlight else { return }
