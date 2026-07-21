@@ -58,14 +58,18 @@ public final class AVAudioPlayback: AudioPlaybackService {
     private let player = AVAudioPlayerNode()
     private let format = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 24_000, channels: 1, interleaved: true)!
     private let lock = NSLock()
+    private let logger: Logger
     private var prepared = false
 
-    public init() {}
+    public init(logger: Logger = RedactingLogger()) { self.logger = logger }
 
     public func enqueuePCM16(_ data: Data) {
         guard !data.isEmpty else { return }
         lock.lock(); defer { lock.unlock() }
-        prepareIfNeeded()
+        guard prepareIfNeeded() else {
+            logger.error("audio.playback_unavailable", metadata: [:])
+            return
+        }
         let frames = AVAudioFrameCount(data.count / MemoryLayout<Int16>.size)
         guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames) else { return }
         buffer.frameLength = frames
@@ -75,16 +79,25 @@ public final class AVAudioPlayback: AudioPlaybackService {
         }
         player.scheduleBuffer(buffer, completionHandler: nil)
         if !player.isPlaying { player.play() }
+        if !player.isPlaying { logger.error("audio.playback_did_not_start", metadata: [:]) }
     }
 
     public func stop() { lock.lock(); player.stop(); lock.unlock() }
 
-    private func prepareIfNeeded() {
-        guard !prepared else { return }
+    private func prepareIfNeeded() -> Bool {
+        guard !prepared else { return true }
         engine.attach(player)
         engine.connect(player, to: engine.mainMixerNode, format: format)
         engine.prepare()
-        do { try engine.start(); prepared = true } catch { prepared = false }
+        do {
+            try engine.start()
+            prepared = true
+            return true
+        } catch {
+            prepared = false
+            logger.error("audio.playback_start_failed", metadata: ["error": error.localizedDescription])
+            return false
+        }
     }
 }
 
