@@ -80,7 +80,7 @@ private struct AssistantOverlayView: View {
     var body: some View {
         let snapshot = store.snapshot
         HStack(spacing: 16) {
-            StatusOrb(tone: snapshot.tone, level: snapshot.microphoneLevel, active: snapshot.phase == .listening)
+            StatusOrb(level: snapshot.microphoneLevel, active: snapshot.phase == .listening)
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
                     Text(snapshot.title).font(.system(size: 19, weight: .semibold)).foregroundStyle(.primary)
@@ -146,27 +146,27 @@ private struct AssistantOverlayView: View {
 }
 
 private struct StatusOrb: View {
-    let tone: OverlayTone; let level: Float; let active: Bool
-    private var accent: Color { switch tone { case .purple: return .indigo; case .red: return .red; case .blue: return .blue; case .amber: return .orange; case .teal: return .teal; case .green: return .green } }
+    let level: Float; let active: Bool
     var body: some View {
         ZStack {
-            // Keep the orb legible at a glance. Phase color is only a faint tint;
-            // the glass surface and white edge carry most of the visual weight.
+            // Keep the orb neutral across every phase: translucent glass, a white
+            // edge, and a soft white bloom make it readable without color noise.
             Circle()
-                .fill(accent.opacity(active ? 0.13 : 0.07))
-                .frame(width: 48, height: 48)
-                .blur(radius: 3)
+                .fill(Color.white.opacity(active ? 0.20 : 0.12))
+                .frame(width: 50, height: 50)
+                .blur(radius: active ? 10 : 7)
             Circle()
-                .fill(.thinMaterial)
-                .overlay(Circle().fill(accent.opacity(active ? 0.18 : 0.10)))
+                .fill(.ultraThinMaterial)
+                .overlay(Circle().fill(Color.white.opacity(active ? 0.12 : 0.07)))
                 .frame(width: 44, height: 44)
-                .overlay(Circle().strokeBorder(.white.opacity(0.42), lineWidth: 1))
-                .shadow(color: .black.opacity(0.16), radius: 3, y: 1)
+                .overlay(Circle().strokeBorder(Color.white.opacity(active ? 0.70 : 0.48), lineWidth: 1.1))
+                .shadow(color: Color.white.opacity(active ? 0.46 : 0.26), radius: active ? 10 : 6)
             if active {
                 Circle()
-                    .fill(.white.opacity(0.92))
+                    .fill(Color.white.opacity(0.98))
                     .frame(width: 8, height: 8)
                     .scaleEffect(0.9 + CGFloat(min(level, 1)) * 0.35)
+                    .shadow(color: Color.white.opacity(0.85), radius: 4)
             }
         }
         .frame(width: 54, height: 54)
