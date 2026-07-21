@@ -10,10 +10,11 @@ public final class MacActionExecutor: ActionExecutor {
     private let files: FileSearchService
     private let windows: WindowController
     private let screen: ScreenCaptureService
+    private let spotify: SpotifyPlaybackController
     private let memory: MemoryStore
     private let workflows: WorkflowStore
     private let decoder = JSONDecoder()
-    public init(apps: AppResolver, delivery: TextDeliveryService, selectedText: SelectedTextProvider, clipboard: ClipboardService, system: SystemActionService, files: FileSearchService, windows: WindowController, screen: ScreenCaptureService, memory: MemoryStore, workflows: WorkflowStore) { self.apps = apps; self.delivery = delivery; self.selectedText = selectedText; self.clipboard = clipboard; self.system = system; self.files = files; self.windows = windows; self.screen = screen; self.memory = memory; self.workflows = workflows }
+    public init(apps: AppResolver, delivery: TextDeliveryService, selectedText: SelectedTextProvider, clipboard: ClipboardService, system: SystemActionService, files: FileSearchService, windows: WindowController, screen: ScreenCaptureService, memory: MemoryStore, workflows: WorkflowStore, spotify: SpotifyPlaybackController = MacSpotifyPlaybackController()) { self.apps = apps; self.delivery = delivery; self.selectedText = selectedText; self.clipboard = clipboard; self.system = system; self.files = files; self.windows = windows; self.screen = screen; self.memory = memory; self.workflows = workflows; self.spotify = spotify }
 
     public func execute(_ call: ToolCall, confirmed: Bool) async -> ActionReceipt {
         switch call.name {
@@ -21,6 +22,20 @@ public final class MacActionExecutor: ActionExecutor {
             guard let args = decode(NameArguments.self, call) else { return invalid(call) }
             switch await apps.resolve(args.name) {
             case let .resolved(candidate): return await apps.open(candidate)
+            case let .ambiguous(candidates): return ActionReceipt(toolName: call.name, requestedTarget: args.name, success: false, verified: false, summary: "I found multiple matches: \(candidates.map(\.name).joined(separator: ", ")).", failureCategory: .ambiguous)
+            case .notFound: return ActionReceipt(toolName: call.name, requestedTarget: args.name, success: false, verified: false, summary: "I could not find \(args.name).", failureCategory: .notFound)
+            }
+        case .focusApp:
+            guard let args = decode(NameArguments.self, call) else { return invalid(call) }
+            switch await apps.resolve(args.name) {
+            case let .resolved(candidate): return await apps.focus(candidate)
+            case let .ambiguous(candidates): return ActionReceipt(toolName: call.name, requestedTarget: args.name, success: false, verified: false, summary: "I found multiple matches: \(candidates.map(\.name).joined(separator: ", ")).", failureCategory: .ambiguous)
+            case .notFound: return ActionReceipt(toolName: call.name, requestedTarget: args.name, success: false, verified: false, summary: "I could not find \(args.name).", failureCategory: .notFound)
+            }
+        case .closeApp:
+            guard let args = decode(NameArguments.self, call) else { return invalid(call) }
+            switch await apps.resolve(args.name) {
+            case let .resolved(candidate): return await apps.quit(candidate)
             case let .ambiguous(candidates): return ActionReceipt(toolName: call.name, requestedTarget: args.name, success: false, verified: false, summary: "I found multiple matches: \(candidates.map(\.name).joined(separator: ", ")).", failureCategory: .ambiguous)
             case .notFound: return ActionReceipt(toolName: call.name, requestedTarget: args.name, success: false, verified: false, summary: "I could not find \(args.name).", failureCategory: .notFound)
             }
@@ -37,6 +52,9 @@ public final class MacActionExecutor: ActionExecutor {
         case .copyText:
             guard let args = decode(TextArguments.self, call) else { return invalid(call) }
             clipboard.writeString(args.text); return ActionReceipt(toolName: .copyText, requestedTarget: "clipboard", success: true, verified: true, summary: "Copied text to the clipboard.")
+        case .playSpotifyPlaylist:
+            guard let args = decode(PlaylistArguments.self, call) else { return invalid(call) }
+            return await spotify.playPlaylist(reference: args.reference)
         case .getSelectedText:
             let context = await selectedText.capture(); return ActionReceipt(toolName: .getSelectedText, requestedTarget: "selected text", success: !context.text.isEmpty, verified: context.method == .accessibility, summary: context.text.isEmpty ? "No selected text is available." : "Captured selected text.", failureCategory: context.text.isEmpty ? .notFound : .none)
         case .listRunningApps:
@@ -119,3 +137,4 @@ private struct PathArguments: Decodable { let path: String }
 private struct TitleArguments: Decodable { let title: String }
 private struct MemoryArguments: Decodable { let key: String; let value: String }
 private struct WorkflowArguments: Decodable { let name: String; let triggers: String; let steps: String }
+private struct PlaylistArguments: Decodable { let reference: String }

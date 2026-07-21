@@ -121,7 +121,7 @@ public final class AssistantCoordinator: AssistantCoordinatorProtocol {
         state.transition(to: AssistantSnapshot(phase: .connecting, mode: .jarvis, title: settings.settings.assistantName, detail: "Starting live conversation…", cancelHint: "⌃⌥X cancels"))
         do {
             let selectionContext = invocationSelection?.text.isEmpty == false ? " The user explicitly selected this context before invoking you: \(invocationSelection!.text). Use it only when relevant to their request; do not retain it." : ""
-            let instructions = "You are \(settings.settings.assistantName), a concise macOS assistant. Use typed tools only. Never claim an action succeeded without its returned receipt. Ask when ambiguous. Require a fresh confirmation for restart and shutdown.\(selectionContext)"
+            let instructions = "You are \(settings.settings.assistantName), a concise macOS assistant. Use typed tools only. Never claim an action succeeded without its returned receipt. When asked to type text, use type_text and do not submit the form. Close apps only with close_app; it performs a normal quit and never force-quits. For an exact Spotify playlist, use play_spotify_playlist only with a Spotify playlist URI or share URL; ask for the share link if the playlist name is ambiguous. Ask when ambiguous. Require a fresh confirmation for restart and shutdown.\(selectionContext)"
             try await realtime.connect(configuration: RealtimeConfiguration(model: settings.settings.realtimeModel, assistantName: settings.settings.assistantName, instructions: instructions, tools: tools.schemas()))
             guard operationID == id, activeMode == .jarvis else { return }
             configureAudioCallback(for: .jarvis, operationID: id)

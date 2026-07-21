@@ -30,6 +30,35 @@ public final class MacAppResolver: AppResolver {
         return ActionReceipt(toolName: .openApp, requestedTarget: candidate.name, resolvedTarget: candidate.url.path, success: success, verified: success, summary: success ? "Opened \(candidate.name)." : "Could not open \(candidate.name).", startedAt: started, endedAt: Date(), failureCategory: success ? .none : .unknown)
     }
 
+    public func focus(_ candidate: AppCandidate) async -> ActionReceipt {
+        let started = Date()
+        guard let application = runningApplication(for: candidate) else {
+            return ActionReceipt(toolName: .focusApp, requestedTarget: candidate.name, success: false, verified: false, summary: "\(candidate.name) is not running.", startedAt: started, endedAt: Date(), failureCategory: .notFound)
+        }
+        let success = application.activate(options: [])
+        try? await Task.sleep(nanoseconds: 120_000_000)
+        let verified = workspace.frontmostApplication?.processIdentifier == application.processIdentifier
+        return ActionReceipt(toolName: .focusApp, requestedTarget: candidate.name, resolvedTarget: candidate.url.path, success: success, verified: verified, summary: success ? "Focused \(candidate.name)." : "Could not focus \(candidate.name).", startedAt: started, endedAt: Date(), failureCategory: success ? .none : .permission, permissionBlocked: !success)
+    }
+
+    public func quit(_ candidate: AppCandidate) async -> ActionReceipt {
+        let started = Date()
+        guard let application = runningApplication(for: candidate) else {
+            return ActionReceipt(toolName: .closeApp, requestedTarget: candidate.name, success: false, verified: false, summary: "\(candidate.name) is not running.", startedAt: started, endedAt: Date(), failureCategory: .notFound)
+        }
+        guard application.bundleIdentifier != Bundle.main.bundleIdentifier else {
+            return ActionReceipt(toolName: .closeApp, requestedTarget: candidate.name, success: false, verified: false, summary: "Jarvis will not quit itself while a request is active.", startedAt: started, endedAt: Date(), failureCategory: .denied)
+        }
+        let requested = application.terminate()
+        try? await Task.sleep(nanoseconds: 250_000_000)
+        let verified = application.isTerminated
+        let summary: String
+        if verified { summary = "Closed \(candidate.name)." }
+        else if requested { summary = "Asked \(candidate.name) to close. macOS may be waiting for unsaved-work confirmation." }
+        else { summary = "\(candidate.name) did not accept a normal quit request." }
+        return ActionReceipt(toolName: .closeApp, requestedTarget: candidate.name, resolvedTarget: candidate.url.path, success: requested, verified: verified, summary: summary, startedAt: started, endedAt: Date(), failureCategory: requested ? .none : .permission, permissionBlocked: !requested)
+    }
+
     private func refreshIfNeeded() {
         guard Date().timeIntervalSince(lastRefresh) > 60 || candidates.isEmpty else { return }
         var values = [AppCandidate]()
@@ -51,6 +80,56 @@ public final class MacAppResolver: AppResolver {
     }
 
     private func isTrustedApplication(_ url: URL) -> Bool { ["/Applications/", "/System/Applications/", NSHomeDirectory() + "/Applications/"].contains { url.path.hasPrefix($0) } }
+
+    private func runningApplication(for candidate: AppCandidate) -> NSRunningApplication? {
+        workspace.runningApplications.first {
+            if let identifier = candidate.bundleIdentifier, $0.bundleIdentifier == identifier { return true }
+            return $0.bundleURL?.standardizedFileURL == candidate.url.standardizedFileURL
+        }
+    }
+}
+
+/// Spotify exposes a compact Apple Events interface for playback. The user
+/// approves this once in macOS's Automation prompt; this never uses a browser
+/// session, password, or Spotify API token.
+public final class MacSpotifyPlaybackController: SpotifyPlaybackController {
+    private let workspace: NSWorkspace
+    public init(workspace: NSWorkspace = .shared) { self.workspace = workspace }
+
+    public func playPlaylist(reference: String) async -> ActionReceipt {
+        let started = Date()
+        guard let playlistURI = Self.playlistURI(from: reference) else {
+            return ActionReceipt(toolName: .playSpotifyPlaylist, requestedTarget: reference, success: false, verified: false, summary: "For exact playback, share the Spotify playlist link or URI with Jarvis.", startedAt: started, endedAt: Date(), failureCategory: .validation)
+        }
+        guard workspace.urlForApplication(withBundleIdentifier: "com.spotify.client") != nil else {
+            return ActionReceipt(toolName: .playSpotifyPlaylist, requestedTarget: reference, success: false, verified: false, summary: "Spotify is not installed on this Mac.", startedAt: started, endedAt: Date(), failureCategory: .notFound)
+        }
+        let source = """
+        tell application id "com.spotify.client"
+            activate
+            play track "\(playlistURI)"
+        end tell
+        """
+        var error: NSDictionary?
+        guard NSAppleScript(source: source)?.executeAndReturnError(&error) != nil else {
+            let message = error?[NSAppleScript.errorMessage] as? String ?? "macOS did not allow Spotify control."
+            return ActionReceipt(toolName: .playSpotifyPlaylist, requestedTarget: reference, resolvedTarget: playlistURI, success: false, verified: false, summary: message, startedAt: started, endedAt: Date(), failureCategory: .permission, permissionBlocked: true)
+        }
+        try? await Task.sleep(nanoseconds: 180_000_000)
+        let running = workspace.runningApplications.contains { $0.bundleIdentifier == "com.spotify.client" }
+        return ActionReceipt(toolName: .playSpotifyPlaylist, requestedTarget: reference, resolvedTarget: playlistURI, success: true, verified: running, summary: "Asked Spotify to play the playlist.", startedAt: started, endedAt: Date())
+    }
+
+    static func playlistURI(from reference: String) -> String? {
+        let clean = reference.trimmingCharacters(in: .whitespacesAndNewlines)
+        if clean.hasPrefix("spotify:playlist:"), clean.range(of: "^spotify:playlist:[A-Za-z0-9]+$", options: .regularExpression) != nil {
+            return clean
+        }
+        guard let url = URL(string: clean), url.host?.lowercased() == "open.spotify.com" else { return nil }
+        let components = url.pathComponents.filter { $0 != "/" }
+        guard components.count >= 2, components[0].lowercased() == "playlist", components[1].range(of: "^[A-Za-z0-9]+$", options: .regularExpression) != nil else { return nil }
+        return "spotify:playlist:\(components[1])"
+    }
 }
 
 public final class BoundedFileSearchService: FileSearchService {
@@ -154,8 +233,11 @@ public final class DefaultToolRegistry: ToolRegistry {
     public func schemas() -> [ToolDefinition] {
         [
             ToolDefinition(name: .openApp, description: "Open an installed macOS application by name.", parameters: [ToolParameter(name: "name", type: .string, description: "Application name")]),
+            ToolDefinition(name: .focusApp, description: "Bring a running macOS application to the front.", parameters: [ToolParameter(name: "name", type: .string, description: "Application name")]),
+            ToolDefinition(name: .closeApp, description: "Ask a running macOS application to quit normally. Never force-quit; macOS can request confirmation for unsaved work.", parameters: [ToolParameter(name: "name", type: .string, description: "Application name")]),
             ToolDefinition(name: .openURL, description: "Open a verified http or https URL.", parameters: [ToolParameter(name: "url", type: .string, description: "URL")]),
             ToolDefinition(name: .webSearch, description: "Search the web in the default browser.", parameters: [ToolParameter(name: "query", type: .string, description: "Search query")]),
+            ToolDefinition(name: .playSpotifyPlaylist, description: "Play an exact Spotify playlist using a spotify:playlist URI or an open.spotify.com/playlist link. If the user only gives a playlist name, ask them for its Spotify share link rather than guessing.", parameters: [ToolParameter(name: "reference", type: .string, description: "Spotify playlist URI or share URL")]),
             ToolDefinition(name: .typeText, description: "Insert text into the focused application without submitting it.", parameters: [ToolParameter(name: "text", type: .string, description: "Text to insert")]),
             ToolDefinition(name: .copyText, description: "Copy text to the clipboard.", parameters: [ToolParameter(name: "text", type: .string, description: "Text to copy")]),
             ToolDefinition(name: .getSelectedText, description: "Read currently selected text when macOS permits it.", parameters: []),

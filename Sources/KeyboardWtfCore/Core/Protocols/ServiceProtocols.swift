@@ -72,6 +72,10 @@ public protocol ClipboardService: AnyObject {
 public protocol AppResolver: AnyObject {
     func resolve(_ query: String) async -> AppResolution
     func open(_ candidate: AppCandidate) async -> ActionReceipt
+    func focus(_ candidate: AppCandidate) async -> ActionReceipt
+    /// Sends the app its normal quit request. It never force-quits, so macOS
+    /// can present the app's standard unsaved-work confirmation when needed.
+    func quit(_ candidate: AppCandidate) async -> ActionReceipt
 }
 
 public protocol FileSearchService: AnyObject {
@@ -82,6 +86,9 @@ public protocol WindowController: AnyObject {
     func listWindows() async -> [String]
     func focusWindow(matching title: String) async -> ActionReceipt
     func minimiseWindow(matching title: String) async -> ActionReceipt
+}
+public protocol SpotifyPlaybackController: AnyObject {
+    func playPlaylist(reference: String) async -> ActionReceipt
 }
 public protocol SpaceController: AnyObject { func switchSpace(direction: Int) async -> ActionReceipt }
 public protocol ScreenCaptureService: AnyObject { func screenshot() async throws -> URL }

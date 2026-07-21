@@ -28,6 +28,25 @@ final class KeyboardWtfCoreTests: XCTestCase {
         XCTAssertEqual(result.inputTokens, 12)
     }
 
+    func testSpotifyPlaylistLinkNormalizesToSafeURI() {
+        XCTAssertEqual(
+            MacSpotifyPlaybackController.playlistURI(from: "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M?si=test"),
+            "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M"
+        )
+        XCTAssertEqual(
+            MacSpotifyPlaybackController.playlistURI(from: "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M"),
+            "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M"
+        )
+        XCTAssertNil(MacSpotifyPlaybackController.playlistURI(from: "spotify:playlist:unsafe\" script"))
+    }
+
+    func testToolRegistryIncludesRequestedMacControls() {
+        let names = Set(DefaultToolRegistry().schemas().map(\.name))
+        XCTAssertTrue(names.contains(.closeApp))
+        XCTAssertTrue(names.contains(.typeText))
+        XCTAssertTrue(names.contains(.playSpotifyPlaylist))
+    }
+
     func testSQLitePersistsMemoryAndWorkflow() async throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".sqlite")
         defer { try? FileManager.default.removeItem(at: url) }

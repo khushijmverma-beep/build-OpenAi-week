@@ -45,6 +45,9 @@ public final class MacSelectedTextProvider: SelectedTextProvider {
 
     public func replaceSelection(with text: String) async -> ActionReceipt {
         let started = Date()
+        guard AXIsProcessTrusted() else {
+            return ActionReceipt(toolName: .typeText, requestedTarget: "focused app", success: false, verified: false, summary: "Accessibility permission is required to type into another app.", startedAt: started, endedAt: Date(), failureCategory: .permission, permissionBlocked: true)
+        }
         let systemWide = AXUIElementCreateSystemWide()
         var focused: CFTypeRef?
         if AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &focused) == .success, let element = focused {
