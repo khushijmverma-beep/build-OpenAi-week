@@ -14,10 +14,13 @@ public final class GlobalHotkeyService {
     public func registerDefaults() throws { try register(AppSettings()) }
 
     public func register(_ settings: AppSettings) throws {
-        unregister()
         let bindings: [(Action, String)] = [(.dictation, settings.dictationShortcut), (.smartWriting, settings.smartWritingShortcut), (.jarvis, settings.jarvisShortcut), (.cancel, settings.cancelShortcut), (.settings, settings.settingsShortcut)]
-        let normalized = bindings.map { $0.1.uppercased().compactWhitespace }
-        guard Set(normalized).count == normalized.count else { throw AppError.unsupported("Two shortcuts are the same. Each action needs a unique shortcut.") }
+        // Validate every shortcut before removing the currently working set.
+        // A malformed saved field must not silently disable all global keys.
+        let planned = try bindings.map { (action: $0.0, keyCode: try Self.keyCode(for: $0.1)) }
+        guard Set(planned.map(\.keyCode)).count == planned.count else { throw AppError.unsupported("Two shortcuts are the same. Each action needs a unique shortcut.") }
+
+        unregister()
         var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         let pointer = Unmanaged.passUnretained(self).toOpaque()
         guard InstallEventHandler(GetApplicationEventTarget(), { _, event, userData in
@@ -26,7 +29,7 @@ public final class GlobalHotkeyService {
             Unmanaged<GlobalHotkeyService>.fromOpaque(userData).takeUnretainedValue().callback(action)
             return noErr
         }, 1, &eventType, pointer, &handler) == noErr else { throw AppError.unsupported("macOS could not install the global hotkey listener.") }
-        for (action, shortcut) in bindings { try register(action, keyCode: try keyCode(for: shortcut)) }
+        for binding in planned { try register(binding.action, keyCode: binding.keyCode) }
     }
 
     public func unregister() {
@@ -44,14 +47,26 @@ public final class GlobalHotkeyService {
     }
 
     private func fourCharCode(_ string: String) -> OSType { string.utf8.reduce(0) { ($0 << 8) + OSType($1) } }
-    private func keyCode(for shortcut: String) throws -> UInt32 {
-        switch shortcut.uppercased().last {
-        case "D": return UInt32(kVK_ANSI_D)
-        case "K": return UInt32(kVK_ANSI_K)
-        case "Q": return UInt32(kVK_ANSI_Q)
-        case "X": return UInt32(kVK_ANSI_X)
-        case "J": return UInt32(kVK_ANSI_J)
-        default: throw AppError.unsupported("\(shortcut) is not a supported shortcut yet. Use Control + Option with D, K, Q, X, or J.")
-        }
+    public static func canonicalShortcut(_ shortcut: String) -> String? {
+        let trimmed = shortcut.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.contains("⌃"), trimmed.contains("⌥"), let key = trimmed.uppercased().last, keyCodes[key] != nil else { return nil }
+        return "⌃⌥\(key)"
     }
+
+    private static func keyCode(for shortcut: String) throws -> UInt32 {
+        guard let key = shortcut.trimmingCharacters(in: .whitespacesAndNewlines).uppercased().last, let code = keyCodes[key] else {
+            throw AppError.unsupported("\(shortcut) is not a supported shortcut. Use Control + Option with a letter key.")
+        }
+        return code
+    }
+
+    private static let keyCodes: [Character: UInt32] = [
+        "A": UInt32(kVK_ANSI_A), "B": UInt32(kVK_ANSI_B), "C": UInt32(kVK_ANSI_C), "D": UInt32(kVK_ANSI_D),
+        "E": UInt32(kVK_ANSI_E), "F": UInt32(kVK_ANSI_F), "G": UInt32(kVK_ANSI_G), "H": UInt32(kVK_ANSI_H),
+        "I": UInt32(kVK_ANSI_I), "J": UInt32(kVK_ANSI_J), "K": UInt32(kVK_ANSI_K), "L": UInt32(kVK_ANSI_L),
+        "M": UInt32(kVK_ANSI_M), "N": UInt32(kVK_ANSI_N), "O": UInt32(kVK_ANSI_O), "P": UInt32(kVK_ANSI_P),
+        "Q": UInt32(kVK_ANSI_Q), "R": UInt32(kVK_ANSI_R), "S": UInt32(kVK_ANSI_S), "T": UInt32(kVK_ANSI_T),
+        "U": UInt32(kVK_ANSI_U), "V": UInt32(kVK_ANSI_V), "W": UInt32(kVK_ANSI_W), "X": UInt32(kVK_ANSI_X),
+        "Y": UInt32(kVK_ANSI_Y), "Z": UInt32(kVK_ANSI_Z)
+    ]
 }

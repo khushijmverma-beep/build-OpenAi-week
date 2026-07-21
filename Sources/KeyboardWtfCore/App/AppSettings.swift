@@ -63,11 +63,44 @@ public final class SettingsStore: ObservableObject {
         let directory = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("keyboard.wtf", isDirectory: true)
         try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         url = directory.appendingPathComponent("settings.json")
-        var loaded = (try? Data(contentsOf: url)).flatMap { try? JSONDecoder().decode(AppSettings.self, from: $0) } ?? AppSettings()
-        // The initial build used Control-Option-comma for Settings. Migrate it to
-        // the dedicated global shortcut requested for opening keyboard.wtf.
+        let stored = (try? Data(contentsOf: url)).flatMap { try? JSONDecoder().decode(AppSettings.self, from: $0) }
+        var loaded = stored ?? AppSettings()
+        // Repair values written by older builds or by text-field edits. A single
+        // malformed shortcut otherwise prevents Carbon from registering every
+        // global shortcut at launch.
+        let defaults = AppSettings()
         if loaded.settingsShortcut == "⌃⌥," { loaded.settingsShortcut = "⌃⌥J" }
+        let candidates = [
+            GlobalHotkeyService.canonicalShortcut(loaded.dictationShortcut),
+            GlobalHotkeyService.canonicalShortcut(loaded.smartWritingShortcut),
+            GlobalHotkeyService.canonicalShortcut(loaded.jarvisShortcut),
+            GlobalHotkeyService.canonicalShortcut(loaded.cancelShortcut),
+            GlobalHotkeyService.canonicalShortcut(loaded.settingsShortcut)
+        ]
+        let fallback = [defaults.dictationShortcut, defaults.smartWritingShortcut, defaults.jarvisShortcut, defaults.cancelShortcut, defaults.settingsShortcut]
+        // Keep Settings at Control-Option-J when possible, then fill the other
+        // actions without duplicates. This repairs files written by an older UI
+        // that stored only the final key character (or control characters).
+        var repaired = Array(repeating: "", count: candidates.count)
+        var used = Set<String>()
+        let settingsIndex = candidates.count - 1
+        repaired[settingsIndex] = candidates[settingsIndex] ?? fallback[settingsIndex]
+        used.insert(repaired[settingsIndex])
+        for index in 0..<settingsIndex {
+            let preferred = candidates[index]
+            let replacement = (preferred.flatMap { used.contains($0) ? nil : $0 })
+                ?? (fallback[index].isEmpty || used.contains(fallback[index]) ? nil : fallback[index])
+                ?? ("⌃⌥" + String("ABCDEFGHIJKLMNOPQRSTUVWXYZ".first { !used.contains("⌃⌥\($0)") } ?? "A"))
+            repaired[index] = replacement
+            used.insert(replacement)
+        }
+        loaded.dictationShortcut = repaired[0]
+        loaded.smartWritingShortcut = repaired[1]
+        loaded.jarvisShortcut = repaired[2]
+        loaded.cancelShortcut = repaired[3]
+        loaded.settingsShortcut = repaired[4]
         settings = loaded
+        if loaded != (stored ?? AppSettings()) { persist() }
     }
     private func persist() { if let data = try? JSONEncoder().encode(settings) { try? data.write(to: url, options: .atomic) } }
 }

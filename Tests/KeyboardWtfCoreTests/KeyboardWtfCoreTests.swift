@@ -50,6 +50,13 @@ final class KeyboardWtfCoreTests: XCTestCase {
         XCTAssertTrue(names.contains(.composeEmail))
     }
 
+    func testHotkeyNormalizationRepairsMalformedValues() {
+        XCTAssertNil(GlobalHotkeyService.canonicalShortcut("j"))
+        XCTAssertEqual(GlobalHotkeyService.canonicalShortcut("⌃⌥P"), "⌃⌥P")
+        XCTAssertNil(GlobalHotkeyService.canonicalShortcut(""))
+        XCTAssertNil(GlobalHotkeyService.canonicalShortcut("X\u{18}\u{18}"))
+    }
+
     func testScreenClickResolverParsesNormalizedCoordinates() throws {
         let target = try OpenAIScreenClickResolver.parse(#"{"found":true,"x":0.42,"y":0.73,"label":"Skip","confidence":0.94}"#)
         XCTAssertTrue(target.found)
