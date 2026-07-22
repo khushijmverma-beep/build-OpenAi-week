@@ -3,42 +3,92 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0a0b0f">
+  <meta name="description" content="ORISIS is a native voice-first assistant for your Mac.">
   <title>ORISIS for macOS</title>
-  <meta name="description" content="A voice-first macOS assistant for dictation, smart writing, and natural Jarvis conversations.">
   <style>
-    :root { color-scheme: dark; --bg:#080b12; --panel:#121826; --line:#26324b; --text:#f4f7ff; --muted:#a9b4c9; --accent:#8d5cff; --accent2:#26d5e8; }
+    :root { color-scheme: dark; --bg:#090a0d; --panel:#111318; --line:#292c34; --text:#f5f6f8; --muted:#a2a6b0; --soft:#dfe2e8; --glow:#ffffff24; }
     * { box-sizing:border-box; }
-    body { margin:0; min-height:100vh; font:16px/1.55 -apple-system,BlinkMacSystemFont,"SF Pro Display",sans-serif; color:var(--text); background:radial-gradient(circle at 25% 5%,#20234a 0,#080b12 48%),var(--bg); }
-    main { width:min(920px,calc(100% - 40px)); margin:0 auto; padding:96px 0 72px; }
-    .eyebrow { color:var(--accent2); letter-spacing:.16em; text-transform:uppercase; font-size:12px; font-weight:700; }
-    h1 { max-width:720px; margin:16px 0; font-size:clamp(44px,8vw,84px); line-height:.98; letter-spacing:-.06em; }
+    html { scroll-behavior:smooth; }
+    body { margin:0; color:var(--text); background:radial-gradient(900px 500px at 50% -12%,#38404c44,transparent 65%),var(--bg); font:16px/1.55 -apple-system,BlinkMacSystemFont,"SF Pro Display","Helvetica Neue",sans-serif; }
+    a { color:inherit; }
+    .wrap { width:min(1060px,calc(100% - 40px)); margin:0 auto; }
+    header { display:flex; justify-content:space-between; align-items:center; padding:25px 0; color:var(--muted); font-size:14px; }
+    .brand { color:var(--text); font-weight:700; letter-spacing:.12em; font-size:13px; }
+    header a { text-decoration:none; }
+    .github { border:1px solid var(--line); border-radius:999px; padding:8px 14px; }
+    main { padding:72px 0 92px; }
+    .hero { max-width:770px; }
+    .eyebrow { color:var(--muted); letter-spacing:.18em; text-transform:uppercase; font-size:11px; font-weight:700; }
+    h1 { margin:18px 0 20px; max-width:700px; font-size:clamp(52px,9vw,104px); line-height:.94; letter-spacing:-.075em; font-weight:700; }
     .lede { max-width:620px; color:var(--muted); font-size:20px; }
-    .actions { display:flex; gap:12px; flex-wrap:wrap; margin:32px 0 62px; }
-    a.button { display:inline-flex; align-items:center; justify-content:center; min-height:48px; padding:0 22px; border:1px solid var(--line); border-radius:12px; color:var(--text); text-decoration:none; font-weight:700; }
-    a.primary { border-color:transparent; background:linear-gradient(135deg,var(--accent),#5a77ff); box-shadow:0 12px 40px #5f48d955; }
-    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px; }
-    .card { padding:22px; border:1px solid var(--line); border-radius:18px; background:#111827cc; backdrop-filter:blur(12px); }
-    .card h2 { margin:0 0 6px; font-size:18px; }
+    .actions { display:flex; flex-wrap:wrap; gap:12px; margin:34px 0 16px; }
+    .button { display:inline-flex; align-items:center; justify-content:center; min-height:50px; padding:0 21px; border:1px solid var(--line); border-radius:12px; text-decoration:none; font-weight:700; }
+    .primary { background:var(--text); color:#0a0b0f; border-color:var(--text); box-shadow:0 10px 34px var(--glow); }
+    .note { color:var(--muted); font-size:14px; }
+    .note a { color:var(--soft); }
+    .rule { height:1px; background:var(--line); margin:78px 0 34px; }
+    .section-title { color:var(--muted); font-size:13px; letter-spacing:.13em; text-transform:uppercase; }
+    .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-top:18px; }
+    .card { min-height:160px; padding:22px; border:1px solid var(--line); border-radius:16px; background:linear-gradient(145deg,#17191f,#0e0f13); }
+    .card h2 { margin:0 0 8px; font-size:20px; letter-spacing:-.025em; }
     .card p { margin:0; color:var(--muted); }
-    footer { margin-top:48px; color:var(--muted); font-size:13px; }
-    code { color:#d7ccff; }
+    .install { display:grid; grid-template-columns:1fr 1fr; gap:50px; margin-top:72px; }
+    ol { margin:18px 0 0; padding-left:22px; color:var(--muted); }
+    li { margin:9px 0; padding-left:4px; }
+    .contact { color:var(--muted); }
+    .contact a { color:var(--soft); }
+    footer { padding:22px 0 34px; color:#747983; font-size:13px; border-top:1px solid var(--line); }
+    @media (max-width:720px) { main { padding-top:44px; } h1 { font-size:clamp(50px,16vw,82px); } .grid,.install { grid-template-columns:1fr; } .install { gap:30px; } header { padding-top:18px; } }
   </style>
 </head>
 <body>
-  <main>
-    <div class="eyebrow">ORISIS · keyboard.wtf · macOS</div>
-    <h1>Talk to your Mac like a person.</h1>
-    <p class="lede">A native menu-bar assistant with local dictation, smart writing, and a low-latency Jarvis conversation mode. Your OpenAI key stays in the macOS Keychain.</p>
-    <div class="actions">
-      <a class="button primary" href="/keyboard.wtf-macos.zip" download>Download for Apple silicon</a>
-      <a class="button" href="https://github.com/khushijmverma-beep/build-OpenAi-week">View source</a>
-    </div>
-    <section class="grid" aria-label="Features">
-      <article class="card"><h2>Dictation</h2><p>Speak naturally and insert literal text into the focused app.</p></article>
-      <article class="card"><h2>Smart Writing</h2><p>Turn rough speech into ready-to-send writing through OpenAI Responses.</p></article>
-      <article class="card"><h2>Jarvis</h2><p>Use a Realtime voice conversation with typed, receipt-backed Mac tools.</p></article>
-    </section>
-    <footer>Requires macOS 14 or later on Apple silicon. After opening, add your own OpenAI API key in Settings and approve microphone and Accessibility access when requested. This local-development build is not notarized.</footer>
-  </main>
+  <div class="wrap">
+    <header>
+      <a class="brand" href="/">ORISIS</a>
+      <a class="github" href="https://github.com/khushijmverma-beep/build-OpenAi-week/releases/tag/v0.1.6">GitHub Release ↗</a>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="eyebrow">A native voice layer for macOS</div>
+        <h1>Your Mac, listening when you ask.</h1>
+        <p class="lede">ORISIS brings local dictation, smart writing, and a natural Realtime conversation to a quiet menu-bar app. Ask it to understand, navigate, or act—and keep control of the final step.</p>
+        <div class="actions">
+          <a class="button primary" href="https://github.com/khushijmverma-beep/build-OpenAi-week/releases/download/v0.1.6/ORISIS-macOS-v0.1.6.zip" download>Download for macOS</a>
+          <a class="button" href="https://github.com/khushijmverma-beep/build-OpenAi-week/releases/tag/v0.1.6">View release</a>
+        </div>
+        <p class="note">Apple silicon · macOS 14+ · You can also download from <a href="https://github.com/khushijmverma-beep/build-OpenAi-week/releases">GitHub</a>.</p>
+      </section>
+
+      <div class="rule"></div>
+      <div class="section-title">Built for the moments between apps</div>
+      <section class="grid" aria-label="ORISIS features">
+        <article class="card"><h2>Speak naturally</h2><p>Use the ORISIS hotkey for a focused, low-latency voice conversation with clear cancellation and interruption behavior.</p></article>
+        <article class="card"><h2>Make words useful</h2><p>Dictate locally, polish rough writing, and transform selected text without silently replacing what you selected.</p></article>
+        <article class="card"><h2>Act with receipts</h2><p>Open apps, navigate visible interfaces, draft Gmail, control media, and run saved workflows with explicit safety boundaries.</p></article>
+      </section>
+
+      <section class="install">
+        <div>
+          <div class="section-title">Install in minutes</div>
+          <ol>
+            <li>Download ORISIS and open the ZIP.</li>
+            <li>Open the app; choose Allow or Open Anyway if macOS asks.</li>
+            <li>Grant the microphone, Accessibility, and other requested permissions.</li>
+            <li>Open Settings and add your own OpenAI API key.</li>
+            <li>Use Control + Option + Q to launch ORISIS.</li>
+          </ol>
+        </div>
+        <div class="contact">
+          <div class="section-title">A personal Mac assistant</div>
+          <p>ORISIS is built for a user-owned Mac. Your key stays local, memories and workflows stay on the Mac, and consequential actions require confirmation.</p>
+          <p>Questions or feedback?<br><a href="mailto:Khushi.jm.verma@gmail.com">Khushi.jm.verma@gmail.com</a><br><a href="mailto:tanushshah2006@gmail.com">tanushshah2006@gmail.com</a></p>
+        </div>
+      </section>
+    </main>
+
+    <footer>ORISIS · keyboard.wtf · Notarization and signing approval may still be required by macOS.</footer>
+  </div>
 </body>
 </html>
