@@ -17,12 +17,14 @@ The app is not notarized yet. macOS may show an **Open Anyway** warning the firs
 
 ### Website
 
-1. Visit [jarvis.vercel.app](https://jarvis.vercel.app).
+1. Visit [useorisis.vercel.app](https://useorisis.vercel.app).
 2. Click **Download for macOS**.
 3. Open the downloaded ZIP and move `keyboard.wtf.app` to `~/Applications` or `/Applications`.
 4. Open the app. If macOS warns that it cannot verify the developer, choose **Open**, or use **System Settings → Privacy & Security → Open Anyway**.
 5. Open Settings, add your OpenAI API key, and choose **Save** and **Test Connection**.
 6. Approve the requested permissions, then use the ORISIS hotkey.
+
+If `useorisis.vercel.app` does not work, download the same build from [GitHub Releases](https://github.com/khushijmverma-beep/build-OpenAi-week/releases).
 
 ### GitHub Releases
 
