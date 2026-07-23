@@ -28,7 +28,7 @@ If `useorisis.vercel.app` does not work, download the same build from [GitHub Re
 
 ### GitHub Releases
 
-The same build is available from the [GitHub Releases page](https://github.com/khushijmverma-beep/build-OpenAi-week/releases). Download the `ORISIS-macOS-v0.1.6.zip` asset, extract it, and follow the steps above.
+The same build is available from the [GitHub Releases page](https://github.com/khushijmverma-beep/build-OpenAi-week/releases). Download the `ORISIS-macOS-v0.1.7.zip` asset, extract it, and follow the steps above.
 
 For local development, use:
 
@@ -60,6 +60,7 @@ The hotkeys are stored in the app settings and registered again when the app rel
 - Reads selected text and can explain, summarize, translate, or rewrite it into the clipboard.
 - Captures and analyzes the screen only after an explicit request.
 - Opens and focuses apps, works with windows and files, searches browsers, controls media, and performs safe typed Mac actions.
+- Closes all tabs in a named or currently running Safari, Google Chrome, Microsoft Edge, or Brave Browser after an explicit request.
 - Drafts Gmail in a fixed order—recipient, subject, body—leaves the draft open, and asks for confirmation before sending.
 - Stores explicit memories and workflows locally so they survive a restart.
 

@@ -94,7 +94,8 @@ public final class MacActionExecutor: ActionExecutor {
             guard let args = decode(TitleArguments.self, call) else { return invalid(call) }
             return await windows.closeWindow(matching: args.title)
         case .closeAllTabs:
-            return closeAllBrowserTabs()
+            guard let args = decode(CloseTabsArguments.self, call) else { return invalid(call) }
+            return closeAllBrowserTabs(in: args.browser)
         case .takeScreenshot:
             do {
                 let url = try await screen.screenshot()
@@ -313,17 +314,33 @@ public final class MacActionExecutor: ActionExecutor {
         ActionReceipt(toolName: .composeEmail, requestedTarget: target, success: false, verified: false, summary: summary, startedAt: started, endedAt: Date(), failureCategory: category, permissionBlocked: permissionBlocked)
     }
 
-    private func closeAllBrowserTabs() -> ActionReceipt {
+    private func closeAllBrowserTabs(in browserName: String?) -> ActionReceipt {
         let started = Date()
-        let browsers: [(name: String, bundleID: String, script: String)] = [
-            ("Safari", "com.apple.Safari", "tell application id \"com.apple.Safari\" to close every tab of every window"),
-            ("Google Chrome", "com.google.Chrome", "tell application id \"com.google.Chrome\" to close every tab of every window")
+        let browsers: [BrowserTabTarget] = [
+            BrowserTabTarget(name: "Safari", bundleID: "com.apple.Safari", aliases: ["safari"], script: "tell application id \"com.apple.Safari\" to close every tab of every window"),
+            BrowserTabTarget(name: "Google Chrome", bundleID: "com.google.Chrome", aliases: ["chrome", "google chrome"], script: "tell application id \"com.google.Chrome\" to close every tab of every window"),
+            BrowserTabTarget(name: "Microsoft Edge", bundleID: "com.microsoft.edgemac", aliases: ["edge", "microsoft edge"], script: "tell application id \"com.microsoft.edgemac\" to close every tab of every window"),
+            BrowserTabTarget(name: "Brave Browser", bundleID: "com.brave.Browser", aliases: ["brave", "brave browser"], script: "tell application id \"com.brave.Browser\" to close every tab of every window")
         ]
-        let running = browsers.filter { browser in
+
+        let requested = browserName?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        let selected: [BrowserTabTarget]
+        if requested.isEmpty || requested == "all" || requested == "all browsers" {
+            selected = browsers
+        } else if let browser = browsers.first(where: { $0.aliases.contains(requested) || $0.name.lowercased() == requested }) {
+            selected = [browser]
+        } else {
+            return ActionReceipt(toolName: .closeAllTabs, requestedTarget: browserName ?? "browser tabs", success: false, verified: false, summary: "I can close tabs in Safari, Google Chrome, Microsoft Edge, or Brave Browser. Specify one of those browsers.", startedAt: started, endedAt: Date(), failureCategory: .validation)
+        }
+
+        let running = selected.filter { browser in
             NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier == browser.bundleID }
         }
         guard !running.isEmpty else {
-            return ActionReceipt(toolName: .closeAllTabs, requestedTarget: "running browser tabs", success: true, verified: true, summary: "No supported browser is running.", startedAt: started, endedAt: Date())
+            let allBrowsers = requested.isEmpty || requested == "all" || requested == "all browsers"
+            let target = allBrowsers ? "running browser tabs" : (browserName ?? "browser tabs")
+            let summary = allBrowsers ? "No supported browser is running." : "\(browserName ?? "That browser") is not running."
+            return ActionReceipt(toolName: .closeAllTabs, requestedTarget: target, success: allBrowsers, verified: allBrowsers, summary: summary, startedAt: started, endedAt: Date(), failureCategory: allBrowsers ? .none : .notFound)
         }
 
         var closed = [String]()
@@ -335,7 +352,7 @@ public final class MacActionExecutor: ActionExecutor {
             }
             closed.append(browser.name)
         }
-        return ActionReceipt(toolName: .closeAllTabs, requestedTarget: "running browser tabs", resolvedTarget: closed.joined(separator: ", "), success: true, verified: true, summary: "Closed all tabs in \(closed.joined(separator: " and ")).", startedAt: started, endedAt: Date())
+        return ActionReceipt(toolName: .closeAllTabs, requestedTarget: browserName ?? "running browser tabs", resolvedTarget: closed.joined(separator: ", "), success: true, verified: true, summary: "Closed all tabs in \(closed.joined(separator: " and ")).", startedAt: started, endedAt: Date())
     }
 
     private func decode<T: Decodable>(_ type: T.Type, _ call: ToolCall) -> T? { try? decoder.decode(type, from: Data(call.argumentsJSON.utf8)) }
@@ -353,6 +370,7 @@ public final class MacActionExecutor: ActionExecutor {
 }
 
 private struct NameArguments: Decodable { let name: String }
+private struct CloseTabsArguments: Decodable { let browser: String? }
 private struct NamesArguments: Decodable { let names: String }
 private struct URLArguments: Decodable { let url: String }
 private struct TextArguments: Decodable { let text: String }
@@ -365,6 +383,13 @@ private struct PlaylistArguments: Decodable { let reference: String }
 private struct ScreenQuestionArguments: Decodable { let question: String }
 private struct ScreenClickArguments: Decodable { let target: String }
 private struct ComposeEmailArguments: Decodable { let app: String?; let to: String; let subject: String; let body: String }
+
+private struct BrowserTabTarget {
+    let name: String
+    let bundleID: String
+    let aliases: [String]
+    let script: String
+}
 
 public final class UnavailableScreenAnalyzer: ScreenAnalyzer {
     public init() {}

@@ -57,6 +57,10 @@ final class KeyboardWtfCoreTests: XCTestCase {
         XCTAssertTrue(names.contains(.composeEmail))
         XCTAssertTrue(names.contains(.sendEmail))
         XCTAssertTrue(names.contains(.closeAllTabs))
+        let closeTabs = try! XCTUnwrap(DefaultToolRegistry().schemas().first(where: { $0.name == .closeAllTabs }))
+        XCTAssertEqual(closeTabs.parameters.first?.name, "browser")
+        XCTAssertEqual(closeTabs.parameters.first?.required, false)
+        XCTAssertTrue(closeTabs.description.contains("Microsoft Edge"))
     }
 
     func testGmailDraftUsesComposeDeepLinkAndSendIsConfirmationGated() {
